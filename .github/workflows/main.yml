@@ -1,16 +1,24 @@
-name: Telegram Proxy Bot Workflow
+name: Telegram Config Bot Runner
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    # اجرا هر ۵ ساعت یک‌بار (برای زنده نگه داشتن مداوم ربات)
+    - cron: '0 */5 * * *'
+  workflow_dispatch: # امکان اجرای دستی از لبه Actions
 
+# مجوز دسترسی نوشتن به GITHUB_TOKEN جهت آپدیت فایل JSON تاریخچه
 permissions:
   contents: write
 
+# جلوگیری از اجرای هم‌زمان دو ورک‌فلو و ایجاد تداخل
+concurrency:
+  group: telegram-bot-group
+  cancel-in-progress: true
+
 jobs:
-  build-and-run:
+  run-telegram-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 350 # حداکثر زمان اجرای یک اکشن (کمی کمتر از ۶ ساعت محدودیت گیت‌هاب)
 
     steps:
       - name: Checkout Repository
@@ -34,4 +42,5 @@ jobs:
           AD_BUTTON_TEXT: ${{ secrets.AD_BUTTON_TEXT }}
           AD_BUTTON_URL: ${{ secrets.AD_BUTTON_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python main.py
