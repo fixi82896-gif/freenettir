@@ -426,7 +426,7 @@ def main():
             p2 = batch_p[1] if len(batch_p) > 1 else p1
 
             keyboard_buttons = [
-                [{"text": "🔌 اتصال به پروکسی", "url": p1}, {"text": "🔌 اتصال به پروکسی", "url": p2}],
+                [{"text": "🚀 اتصال به پروکسی", "url": p1}, {"text": "🚀 اتصال به پروکسی", "url": p2}],
                 [{"text": AD_BUTTON_TEXT, "url": AD_BUTTON_URL}]
             ]
             reply_markup = {"inline_keyboard": keyboard_buttons}
@@ -450,7 +450,7 @@ def main():
                 post_text += f"<b>📌 سرور {labels[idx]} :</b>{ping_display}\n\n<code>{final_cfg}</code>\n\n"
                 history["sent_hashes"].append(get_md5(cfg))
 
-            post_text += "<b>🌐 @freenettir 👈👈 مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
+            post_text += "<b>🌐 @freenettir  مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
             logo = get_random_logo()
 
             try:
