@@ -521,7 +521,7 @@ def main():
             "⭕️ این فایل حاوی ۱۰۰ کانفیگ از کشورهای زیر می باشد:\n"
             f"{stats_text}\n\n"
             "#️⃣ #v2ray #proxy #server\n\n"
-            "✅ @freenettir         👈 مخزن اصلی سرورها"
+            "✅ @freenettir         مخزن اصلی سرورها"
         )
 
         if len(config_caption) > 1000:
