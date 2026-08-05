@@ -451,7 +451,7 @@ def main():
                 post_text += f"<b>📌 سرور {labels[idx]} :</b>{ping_display}\n\n<code>{final_cfg}</code>\n\n"
                 history["sent_hashes"].append(get_md5(cfg))
 
-            post_text += "<b>🌐 @freenettir 👈👈 مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
+            post_text += "<b>🌐 @freenettir  مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
             logo = get_random_logo()
 
             try:
