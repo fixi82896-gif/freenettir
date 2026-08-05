@@ -427,7 +427,7 @@ def main():
             p2 = batch_p[1] if len(batch_p) > 1 else p1
 
             keyboard_buttons = [
-                [{"text": "🔌 اتصال به پروکسی", "url": p1}, {"text": "🔌 اتصال به پروکسی", "url": p2}],
+                [{"text": "🚀 اتصال به پروکسی", "url": p1}, {"text": "🚀 اتصال به پروکسی", "url": p2}],
                 [{"text": AD_BUTTON_TEXT, "url": AD_BUTTON_URL}]
             ]
             reply_markup = {"inline_keyboard": keyboard_buttons}
