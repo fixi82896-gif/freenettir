@@ -1,9 +1,12 @@
 {
-  "last_serial": 3,
+  "last_serial": 6,
   "sent_hashes": [
     "6e6e30c20961776d86683524d16e0371",
     "f481e0df22327e34a33f46fd8d10e0d7",
-    "75fbffec11464bf694ea653d1adcbd0e"
+    "75fbffec11464bf694ea653d1adcbd0e",
+    "fefad309b606c54e3971e93640801b45",
+    "6531e09814575a8779232a9281eb1629",
+    "f877097da95add166c6d1b3e168c4351"
   ],
   "leftover_configs": [
     [
@@ -876,6 +879,9 @@
   "sent_proxies_hashes": [
     "8efc0e65eb24adb2901756acb0a880bd",
     "5fb83c48bde2a09cd296edb2a59dfd52",
-    "fe0c1de124a38073f633b351ccb88713"
+    "fe0c1de124a38073f633b351ccb88713",
+    "de5867816c134d31c2e26a12bcbbcdc1",
+    "a8a59962194defb8373a6174b7c276cb",
+    "548523c87171d6c9ad36baed713c1a61"
   ]
 }
