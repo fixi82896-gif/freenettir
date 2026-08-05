@@ -9,6 +9,7 @@ import requests
 import hashlib
 import traceback
 from datetime import datetime, timezone, timedelta
+from urllib.parse import quote
 
 # تنظیمات متغیرهای محیطی
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -82,7 +83,6 @@ def extract_configs_from_text(text):
             full_cfg = match.group(1)
             clean_cfg = full_cfg.split('#')[0]
 
-            # استخراج پینگ (الگوی ping:8.95ms یا مشابه آن)
             ping_match = re.search(r'ping[:\s]*([\d\.]+\s*ms)', line, re.IGNORECASE)
             ping_val = ping_match.group(1).strip() if ping_match else None
 
@@ -252,7 +252,6 @@ def collect_configs(history):
     print("\n🔍 در حال جمع‌آوری کانفیگ‌ها...")
     valid_configs = []
 
-    # بازیابی باقی‌مانده‌های چرخه قبل
     for item in history.get("leftover_configs", []):
         if isinstance(item, (list, tuple)) and len(item) == 2:
             valid_configs.append((item[0], item[1]))
@@ -427,7 +426,7 @@ def main():
             p2 = batch_p[1] if len(batch_p) > 1 else p1
 
             keyboard_buttons = [
-                [{"text": "🚀 اتصال به پروکسی", "url": p1}, {"text": "🚀 اتصال به پروکسی", "url": p2}],
+                [{"text": "🔌 اتصال به پروکسی", "url": p1}, {"text": "🔌 اتصال به پروکسی", "url": p2}],
                 [{"text": AD_BUTTON_TEXT, "url": AD_BUTTON_URL}]
             ]
             reply_markup = {"inline_keyboard": keyboard_buttons}
@@ -451,7 +450,7 @@ def main():
                 post_text += f"<b>📌 سرور {labels[idx]} :</b>{ping_display}\n\n<code>{final_cfg}</code>\n\n"
                 history["sent_hashes"].append(get_md5(cfg))
 
-            post_text += "<b>🌐 @freenettir  مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
+            post_text += "<b>🌐 @freenettir 👈👈 مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
             logo = get_random_logo()
 
             try:
@@ -487,7 +486,11 @@ def main():
             pass
 
         time.sleep(2)
-        support_markup = {"inline_keyboard": [[{"text": "🏛️ حمایت از کانال", "url": "https://t.me/freenettir"}]]}
+
+        # لینک اشتراک‌گذاری مستقیم تلگرام
+        share_text = quote("🚀 آخرین سرورها و پروکسی‌های پرسرعت رایگان را در کانال ما دنبال کنید:")
+        share_url = f"https://t.me/share/url?url=https://t.me/freenettir&text={share_text}"
+        support_markup = {"inline_keyboard": [[{"text": "🏛️ اشتراک‌گذاری و حمایت از کانال", "url": share_url}]]}
 
         config_file_name = "100_Latest_Servers.txt"
         with open(config_file_name, "w", encoding="utf-8") as f:
@@ -498,8 +501,16 @@ def main():
         time_str = now_tehran.strftime("%H:%M")
         date_str = f"{jy}/{jm:02d}/{jd:02d}"
 
+        # ساخت چیدمان دو ستونه کشورها
         sorted_countries = sorted(country_flags.keys())
-        stats_text = "".join([f"🔹 {country} {country_flags.get(country, '🌍')}\n" for country in sorted_countries])
+        country_items = [f"🔹 {country} {country_flags.get(country, '🌍')}" for country in sorted_countries]
+        stats_lines = []
+        for i in range(0, len(country_items), 2):
+            if i + 1 < len(country_items):
+                stats_lines.append(f"{country_items[i]}  |  {country_items[i+1]}")
+            else:
+                stats_lines.append(f"{country_items[i]}")
+        stats_text = "\n".join(stats_lines)
 
         config_caption = (
             "💌 100 سرور آخر کانال به صورت فایل متنی\n\n"
@@ -507,8 +518,8 @@ def main():
             "🔥 شما میتونید با استفاده از فایل تکست «💌 100 سرور آخر کانال» که هر ساعت  داخل کانال ارسال میشه کاملا فیلترینگ رو بی معنی کنید.\n"
             " چند پست آخر کانال رو ببینید تا فایل رو پیدا کنید. بعدش فایل رو باز کنید و محتوای اونو  داخل اپلیکیشن مورد استفاده خودتون وارد کنید. همین! خداحافظ فیلترینگ 👋\n"
             "با این کار دیگه لازم نیست به صورت دستی تک تک سرورها رو کپی کنید و داخل اپلیکیشن وارد کنید. ♥️\n\n"
-            "⭕️ این فایل حاوی ۱۰۰ کانفیگ از کشورهای زیر می باشد \n"
-            f"{stats_text}\n"
+            "⭕️ این فایل حاوی ۱۰۰ کانفیگ از کشورهای زیر می باشد:\n"
+            f"{stats_text}\n\n"
             "#️⃣ #v2ray #proxy #server\n\n"
             "✅ @freenettir         👈 مخزن اصلی سرورها"
         )
