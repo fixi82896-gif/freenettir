@@ -18,9 +18,8 @@ ADMIN_ID = os.environ.get("TELEGRAM_ADMIN_ID")
 AD_BUTTON_TEXT = os.environ.get("AD_BUTTON_TEXT", "🚀 اتصال به پروکسی پرسرعت")
 AD_BUTTON_URL = os.environ.get("AD_BUTTON_URL", "https://t.me/freenettir")
 
-# متغیرهای توکار گیت‌هاب برای ذخیره‌سازی خودکار در ریپازیتوری
-GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY")  # به صورت خودکار توسط گیت‌هاب مقداردهی می‌شود (username/repo)
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")      # توکن دسترسی توکار گیت‌هاب
+GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
 HISTORY_FILE = "sent_configs_history.json"
 IP_CACHE = {}
@@ -65,15 +64,31 @@ def get_md5(text):
 
 
 def extract_configs_from_text(text):
-    """استخراج کانفیگ‌ها با پشتیبانی از متن ساده و Base64"""
-    configs = re.findall(r'((?:vless|vmess|trojan|ss)://[^\s#"\'>]+)', text)
-    if not configs:
+    """استخراج کانفیگ‌ها و مقدار پینگ اختصاصی از متن ساده یا Base64"""
+    results = []
+    raw_text = text
+
+    if not re.search(r'(?:vless|vmess|trojan|ss)://', text):
         try:
             decoded_text = base64.b64decode(text.strip()).decode('utf-8', errors='ignore')
-            configs = re.findall(r'((?:vless|vmess|trojan|ss)://[^\s#"\'>]+)', decoded_text)
+            raw_text = decoded_text
         except Exception:
             pass
-    return configs
+
+    lines = raw_text.splitlines()
+    for line in lines:
+        match = re.search(r'((?:vless|vmess|trojan|ss)://[^\s"\'>]+)', line)
+        if match:
+            full_cfg = match.group(1)
+            clean_cfg = full_cfg.split('#')[0]
+
+            # استخراج پینگ (الگوی ping:8.95ms یا مشابه آن)
+            ping_match = re.search(r'ping[:\s]*([\d\.]+\s*ms)', line, re.IGNORECASE)
+            ping_val = ping_match.group(1).strip() if ping_match else None
+
+            results.append((clean_cfg, ping_val))
+
+    return results
 
 
 def get_country_info(config_str):
@@ -196,14 +211,12 @@ def save_history(history):
     history["sent_hashes"] = history["sent_hashes"][-5000:]
     history["sent_proxies_hashes"] = history["sent_proxies_hashes"][-5000:]
 
-    # ۱. ذخیره محلی در رانر
     try:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ خطا در ذخیره محلی: {e}")
 
-    # ۲. آپدیت مستقیم فایل روی خودِ ریپازیتوری گیت‌هاب
     if GITHUB_REPO and GITHUB_TOKEN:
         try:
             url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{HISTORY_FILE}"
@@ -212,7 +225,6 @@ def save_history(history):
                 "Accept": "application/vnd.github+json"
             }
             
-            # دریافت SHA فعلی فایل برای مجوز ویرایش
             res = requests.get(url, headers=headers, timeout=5)
             sha = res.json().get("sha") if res.status_code == 200 else None
 
@@ -236,11 +248,18 @@ def save_history(history):
 
 
 def collect_configs(history):
-    """جمع‌آوری و پردازش کانفیگ‌ها"""
+    """جمع‌آوری و پردازش کانفیگ‌ها به همراه پینگ"""
     print("\n🔍 در حال جمع‌آوری کانفیگ‌ها...")
-    valid_configs = history["leftover_configs"]
-    primary_configs = []
+    valid_configs = []
 
+    # بازیابی باقی‌مانده‌های چرخه قبل
+    for item in history.get("leftover_configs", []):
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            valid_configs.append((item[0], item[1]))
+        elif isinstance(item, str):
+            valid_configs.append((item, None))
+
+    primary_configs = []
     try:
         res = requests.get("https://manager.onetwothree123.ir/", timeout=10)
         if res.status_code == 200:
@@ -248,10 +267,11 @@ def collect_configs(history):
     except Exception as e:
         print(f"⚠️ منبع اصلی کانفیگ پاسخ نداد: {e}")
 
-    for c in primary_configs:
-        cfg_hash = get_md5(c)
-        if cfg_hash not in history["sent_hashes"] and c not in valid_configs:
-            valid_configs.append(c)
+    for cfg, ping in primary_configs:
+        cfg_hash = get_md5(cfg)
+        already_exists = any(c[0] == cfg for c in valid_configs)
+        if cfg_hash not in history["sent_hashes"] and not already_exists:
+            valid_configs.append((cfg, ping))
 
     if len(valid_configs) < 100:
         print("🛡️ دریافت کانفیگ از اگرگیتورهای برتر گیت‌هاب...")
@@ -266,10 +286,11 @@ def collect_configs(history):
                 r = requests.get(src, timeout=8)
                 if r.status_code == 200:
                     found = extract_configs_from_text(r.text)
-                    for c in found:
-                        cfg_hash = get_md5(c)
-                        if cfg_hash not in history["sent_hashes"] and c not in valid_configs:
-                            valid_configs.append(c)
+                    for cfg, ping in found:
+                        cfg_hash = get_md5(cfg)
+                        already_exists = any(c[0] == cfg for c in valid_configs)
+                        if cfg_hash not in history["sent_hashes"] and not already_exists:
+                            valid_configs.append((cfg, ping))
                         if len(valid_configs) >= 150:
                             break
             except Exception as e:
@@ -279,9 +300,10 @@ def collect_configs(history):
 
     if len(valid_configs) < 3 and primary_configs:
         print("⚠️ فعال‌سازی حالت بازیافت کانفیگ‌ها...")
-        for c in primary_configs:
-            if c not in valid_configs:
-                valid_configs.append(c)
+        for cfg, ping in primary_configs:
+            already_exists = any(c[0] == cfg for c in valid_configs)
+            if not already_exists:
+                valid_configs.append((cfg, ping))
 
     return valid_configs
 
@@ -413,20 +435,23 @@ def main():
             post_text = ""
             labels = ["اول", "دوم", "سوم"]
 
-            for idx, cfg in enumerate(batch_c):
+            for idx, item in enumerate(batch_c):
+                cfg, ping = item if isinstance(item, (tuple, list)) else (item, None)
+                
                 history["last_serial"] += 1
                 serial_str = f"[{history['last_serial']:06d}]"
                 country, flag = get_country_info(cfg)
                 country_flags[country] = flag
                 
-                clean_cfg = cfg.split('#')[0]
-                final_cfg = f"{clean_cfg}#{serial_str} - {flag} {country} | @freenettir"
+                ping_str = f" | ⚡️ {ping}" if ping else ""
+                final_cfg = f"{cfg}#{serial_str} - {flag} {country}{ping_str} | @freenettir"
                 sent_all_configs.append(final_cfg)
                 
-                post_text += f"<b>📌 سرور {labels[idx]} :</b>\n\n<code>{final_cfg}</code>\n\n"
+                ping_display = f" (⚡️ پینگ: <code>{ping}</code>)" if ping else ""
+                post_text += f"<b>📌 سرور {labels[idx]} :</b>{ping_display}\n\n<code>{final_cfg}</code>\n\n"
                 history["sent_hashes"].append(get_md5(cfg))
 
-            post_text += "<b>🌐 @freenettir | مخزن اصلی سرورها</b>\n🔹 #v2ray #vpn #proxy"
+            post_text += "<b>🌐 @freenettir 👈👈 مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
             logo = get_random_logo()
 
             try:
