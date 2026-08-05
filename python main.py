@@ -33,7 +33,7 @@ def get_tehran_now():
 
 
 def gregorian_to_jalali(gy, gm, gd):
-    """مبدل خودکار تاریخ میلادی به شمسی"""
+    """مبدل دقیق و اصلاح‌شده تاریخ میلادی به شمسی"""
     g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
     if gy > 1600:
         jy = 979
@@ -41,8 +41,8 @@ def gregorian_to_jalali(gy, gm, gd):
     else:
         jy = 0
         gy -= 621
-    gy2 = (gy + 3) if gy > 0 else (gy + 4)
-    days = (365 * gy) + ((gy2) // 4) - ((gy2) // 100) + ((gy2) // 400) + g_d_m[gm - 1] + gd - 1
+    gy2 = gy + 1 if (gm > 2 or (gm == 2 and gd > 28)) else gy
+    days = 365 * gy + (gy2 + 3) // 4 - (gy2 + 99) // 100 + (gy2 + 399) // 400 - 80 + gd + g_d_m[gm - 1]
     jy += 33 * (days // 12053)
     days %= 12053
     jy += 4 * (days // 1461)
@@ -91,14 +91,29 @@ def extract_configs_from_text(text):
     return results
 
 
+def extract_host_from_config(config_str):
+    """استخراج آدرس یا IP از انواع پروتکل‌ها شامل VMess"""
+    try:
+        if config_str.startswith("vmess://"):
+            b64_data = config_str.replace("vmess://", "").strip()
+            b64_data += '=' * (-len(b64_data) % 4)
+            decoded = base64.b64decode(b64_data).decode('utf-8', errors='ignore')
+            json_data = json.loads(decoded)
+            return json_data.get("add") or json_data.get("host")
+        elif "@" in config_str:
+            parts = config_str.split('@')
+            host_port = parts[1].split(':')[0]
+            return host_port.split('?')[0].split('/')[0]
+    except Exception:
+        pass
+    return None
+
+
 def get_country_info(config_str):
     """استخراج لوکیشن و پرچم با استفاده از سیستم Cache"""
     try:
-        parts = config_str.split('@')
-        if len(parts) > 1:
-            host_port = parts[1].split(':')[0]
-            host = host_port.split('?')[0].split('/')[0]
-
+        host = extract_host_from_config(config_str)
+        if host:
             if host in IP_CACHE:
                 return IP_CACHE[host]
 
@@ -136,13 +151,13 @@ def send_channel_maintenance_notice():
     """ارسال پیام اطلاع‌رسانی توقف به کانال"""
     if not TOKEN or not CHANNEL:
         return
-        
+
     notice_text = (
         "اعضای محترم کانال ،\n"
         "با عرض پوزش ربات ارسال کننده جهت بازبینی و اصلاح غیر فعال شده ، از تحمل و صبوری شما بسیار سپاسگزارم \n"
         "با تشکر ؛ مدیریت کانال"
     )
-    
+
     try:
         requests.post(
             f"https://api.telegram.org/bot{TOKEN}/sendMessage",
@@ -224,7 +239,7 @@ def save_history(history):
                 "Authorization": f"Bearer {GITHUB_TOKEN}",
                 "Accept": "application/vnd.github+json"
             }
-            
+
             res = requests.get(url, headers=headers, timeout=5)
             sha = res.json().get("sha") if res.status_code == 200 else None
 
@@ -436,16 +451,16 @@ def main():
 
             for idx, item in enumerate(batch_c):
                 cfg, ping = item if isinstance(item, (tuple, list)) else (item, None)
-                
+
                 history["last_serial"] += 1
                 serial_str = f"[{history['last_serial']:06d}]"
                 country, flag = get_country_info(cfg)
                 country_flags[country] = flag
-                
+
                 ping_str = f" | ⚡️ {ping}" if ping else ""
                 final_cfg = f"{cfg}#{serial_str} - {flag} {country}{ping_str} | @freenettir"
                 sent_all_configs.append(final_cfg)
-                
+
                 ping_display = f" (⚡️ پینگ: <code>{ping}</code>)" if ping else ""
                 post_text += f"<b>📌 سرور {labels[idx]} :</b>{ping_display}\n\n<code>{final_cfg}</code>\n\n"
                 history["sent_hashes"].append(get_md5(cfg))
@@ -487,7 +502,6 @@ def main():
 
         time.sleep(2)
 
-        # لینک اشتراک‌گذاری مستقیم تلگرام
         share_text = quote("🚀 آخرین سرورها و پروکسی‌های پرسرعت رایگان را در کانال ما دنبال کنید:")
         share_url = f"https://t.me/share/url?url=https://t.me/freenettir&text={share_text}"
         support_markup = {"inline_keyboard": [[{"text": "🏛️ اشتراک‌گذاری و حمایت از کانال", "url": share_url}]]}
@@ -501,9 +515,9 @@ def main():
         time_str = now_tehran.strftime("%H:%M")
         date_str = f"{jy}/{jm:02d}/{jd:02d}"
 
-        # ساخت چیدمان دو ستونه کشورها
+        # چیدمان دو ستونه کشورها (پرچم اول + نام کشور بدون لوزی آبی)
         sorted_countries = sorted(country_flags.keys())
-        country_items = [f"🔹 {country} {country_flags.get(country, '🌍')}" for country in sorted_countries]
+        country_items = [f"{country_flags.get(country, '🌍')} {country}" for country in sorted_countries]
         stats_lines = []
         for i in range(0, len(country_items), 2):
             if i + 1 < len(country_items):
@@ -513,51 +527,40 @@ def main():
         stats_text = "\n".join(stats_lines)
 
         config_caption = (
-            "💌 100 سرور آخر کانال به صورت فایل متنی\n\n"
-            f"📅 آخرین آپدیت : {time_str} | {date_str} 🇮🇷\n\n\n"
-            "🔥 شما میتونید با استفاده از فایل تکست «💌 100 سرور آخر کانال» که هر ساعت  داخل کانال ارسال میشه کاملا فیلترینگ رو بی معنی کنید.\n"
-            " چند پست آخر کانال رو ببینید تا فایل رو پیدا کنید. بعدش فایل رو باز کنید و محتوای اونو  داخل اپلیکیشن مورد استفاده خودتون وارد کنید. همین! خداحافظ فیلترینگ 👋\n"
-            "با این کار دیگه لازم نیست به صورت دستی تک تک سرورها رو کپی کنید و داخل اپلیکیشن وارد کنید. ♥️\n\n"
-            "⭕️ این فایل حاوی ۱۰۰ کانفیگ از کشورهای زیر می باشد:\n"
-            f"{stats_text}\n\n"
-            "#️⃣ #v2ray #proxy #server\n\n"
-            "✅ @freenettir         مخزن اصلی سرورها"
+            "💌 <b>100 سرور آخر کانال به صورت فایل متنی</b>\n\n"
+            f"📅 <b>آخرین آپدیت:</b> {time_str} | {date_str} 🇮🇷\n\n"
+            f"🌍 <b>پراکندگی کشورهای سرورها:</b>\n{stats_text}\n\n"
+            "🔥 شما می‌توانید با دانلود یا کپی کردن این فایل، تمامی سرورها را به صورت یکجا در برنامه وارد کنید.\n\n"
+            "🌐 <b>@freenettir  مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
         )
 
-        if len(config_caption) > 1000:
-            config_caption = config_caption[:990] + "\n..."
-
-        try:
-            with open(config_file_name, "rb") as file_data:
-                res = send_telegram_with_retry(
-                    f"https://api.telegram.org/bot{TOKEN}/sendDocument",
-                    data={"chat_id": CHANNEL, "caption": config_caption, "reply_markup": json.dumps(support_markup)},
-                    files={"document": file_data}
-                )
-                if res and res.status_code == 200 and res.json().get("ok"):
-                    print("✅ فایل ۱۰۰ سرور با موفقیت ارسال شد.")
-                else:
-                    print(f"❌ خطای پاسخ تلگرام در ارسال فایل: {res.text if res else 'No Response'}")
-        except Exception as e:
-            print(f"❌ خطا در ارسال فایل سرورها: {e}")
-
         if os.path.exists(config_file_name):
-            os.remove(config_file_name)
+            try:
+                with open(config_file_name, "rb") as doc:
+                    send_telegram_with_retry(
+                        f"https://api.telegram.org/bot{TOKEN}/sendDocument",
+                        data={
+                            "chat_id": CHANNEL,
+                            "caption": config_caption,
+                            "parse_mode": "HTML",
+                            "reply_markup": json.dumps(support_markup)
+                        },
+                        files={"document": doc}
+                    )
+                print("✅ فایل متنی ۱۰۰ سرور آخر به همراه کاور به کانال ارسال شد.")
+            except Exception as e:
+                print(f"⚠️ خطا در ارسال فایل متنی: {e}")
 
-        save_history(history)
-
-        print(f"\n⏸️ پایان چرخه شماره {cycle_counter}. شروع ۳۰ دقیقه استراحت (۱۸۰۰ ثانیه)...")
+        print("\n😴 چرخه تمام شد؛ شروع ۳۰ دقیقه استراحت...")
         time.sleep(1800)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception as crash_error:
-        err_str = str(crash_error)
-        tb_str = traceback.format_exc()
-        print(f"\n💥 کرش ربات رخ داد: {err_str}")
-        
+    except Exception as err:
+        tb = traceback.format_exc()
+        print(f"💥 کرش کلی ربات: {err}")
+        send_crash_telegram_admin(str(err), tb)
         send_channel_maintenance_notice()
-        send_crash_telegram_admin(err_str, tb_str)
         sys.exit(1)
