@@ -15,12 +15,15 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL = os.environ.get("TELEGRAM_CHANNEL")
 ADMIN_ID = os.environ.get("TELEGRAM_ADMIN_ID")
 
-# متغیرهای محیطی تبلیغات
 AD_BUTTON_TEXT = os.environ.get("AD_BUTTON_TEXT", "🚀 اتصال به پروکسی پرسرعت")
 AD_BUTTON_URL = os.environ.get("AD_BUTTON_URL", "https://t.me/freenettir")
 
+# متغیرهای توکار گیت‌هاب برای ذخیره‌سازی خودکار در ریپازیتوری
+GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY")  # به صورت خودکار توسط گیت‌هاب مقداردهی می‌شود (username/repo)
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")      # توکن دسترسی توکار گیت‌هاب
+
 HISTORY_FILE = "sent_configs_history.json"
-IP_CACHE = {}  # کش محلی برای جلوگیری از استعلام‌های تکراری IP
+IP_CACHE = {}
 
 
 def get_tehran_now():
@@ -74,7 +77,7 @@ def extract_configs_from_text(text):
 
 
 def get_country_info(config_str):
-    """استخراج لوکیشن و پرچم با استفاده از سیستم Cache جهت جلوگیری از Rate Limit"""
+    """استخراج لوکیشن و پرچم با استفاده از سیستم Cache"""
     try:
         parts = config_str.split('@')
         if len(parts) > 1:
@@ -97,7 +100,7 @@ def get_country_info(config_str):
 
 
 def send_telegram_with_retry(url, data=None, files=None, max_retries=3):
-    """ارسال به تلگرام همراه با مدیریت نرخ ارسال (Rate Limit)"""
+    """ارسال به تلگرام همراه با مدیریت نرخ ارسال"""
     for attempt in range(max_retries):
         try:
             res = requests.post(url, data=data, files=files, timeout=15)
@@ -169,16 +172,16 @@ def send_crash_telegram_admin(error_msg, full_traceback):
 
 
 def load_history():
-    """بارگیری تاریخچه و اعمال مقداردهی اولیه"""
+    """بارگیری تاریخچه از فایل موجود در ریپازیتوری"""
+    history = {}
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 history = json.load(f)
+                print("✅ تاریخچه با موفقیت از فایل ریپازیتوری بارگیری شد.")
         except Exception as e:
-            print(f"⚠️ خطا در خواندن تاریخچه: {e}")
+            print(f"⚠️ خطا در خواندن فایل تاریخچه: {e}")
             history = {}
-    else:
-        history = {}
 
     history.setdefault("last_serial", 0)
     history.setdefault("sent_hashes", [])
@@ -189,16 +192,51 @@ def load_history():
 
 
 def save_history(history):
-    """ذخیره تاریخچه با محدودسازی حجم داده‌ها جهت جلوگیری از افت سرعت"""
+    """ذخیره محلی و بروزرسانی آنلاین فایل تاریخچه مستقیماً در ریپازیتوری گیت‌هاب"""
     history["sent_hashes"] = history["sent_hashes"][-5000:]
     history["sent_proxies_hashes"] = history["sent_proxies_hashes"][-5000:]
 
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+    # ۱. ذخیره محلی در رانر
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ خطا در ذخیره محلی: {e}")
+
+    # ۲. آپدیت مستقیم فایل روی خودِ ریپازیتوری گیت‌هاب
+    if GITHUB_REPO and GITHUB_TOKEN:
+        try:
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{HISTORY_FILE}"
+            headers = {
+                "Authorization": f"Bearer {GITHUB_TOKEN}",
+                "Accept": "application/vnd.github+json"
+            }
+            
+            # دریافت SHA فعلی فایل برای مجوز ویرایش
+            res = requests.get(url, headers=headers, timeout=5)
+            sha = res.json().get("sha") if res.status_code == 200 else None
+
+            json_str = json.dumps(history, ensure_ascii=False, indent=2)
+            content_b64 = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
+
+            payload = {
+                "message": "🤖 بروزرسانی خودکار تاریخچه [Bot]",
+                "content": content_b64
+            }
+            if sha:
+                payload["sha"] = sha
+
+            put_res = requests.put(url, headers=headers, json=payload, timeout=10)
+            if put_res.status_code in [200, 201]:
+                print("✅ فایل sent_configs_history.json مستقیماً در ریپازیتوری بروزرسانی شد.")
+            else:
+                print(f"⚠️ خطای API گیت‌هاب در ثبت تغییرات: کد {put_res.status_code}")
+        except Exception as e:
+            print(f"⚠️ خطا در بروزرسانی آنلاین فایل ریپازیتوری: {e}")
 
 
 def collect_configs(history):
-    """جمع‌آوری و پردازش کانفیگ‌ها از منبع اصلی و اگرگیتورها"""
+    """جمع‌آوری و پردازش کانفیگ‌ها"""
     print("\n🔍 در حال جمع‌آوری کانفیگ‌ها...")
     valid_configs = history["leftover_configs"]
     primary_configs = []
