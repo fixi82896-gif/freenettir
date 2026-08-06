@@ -514,8 +514,8 @@ def main():
         time_str = now_tehran.strftime("%H:%M")
         date_str = f"{jy}/{jm:02d}/{jd:02d}"
 
-        channel_name_clean = CHANNEL.replace("@", "") if CHANNEL else "freenettir"
-        config_file_name = f"@{channel_name_clean}-{jy}-{jm:02d}-{jd:02d}-{now_tehran.hour:02d}-{now_tehran.minute:02d}.txt"
+        # نام‌گذاری ثابت و مطمئن فایل متنی با شروع @freenettir
+        config_file_name = f"@freenettir-{jy}-{jm:02d}-{jd:02d}-{now_tehran.hour:02d}-{now_tehran.minute:02d}.txt"
 
         with open(config_file_name, "w", encoding="utf-8") as f:
             f.write("\n\n".join(sent_all_configs))
