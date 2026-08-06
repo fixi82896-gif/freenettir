@@ -1,5 +1,5 @@
 {
-  "last_serial": 1060,
+  "last_serial": 1063,
   "sent_hashes": [
     "77be0697b0f177f7dee503975df198a0",
     "a7c560a79a8335c4fe905b20d0026594",
@@ -1060,7 +1060,10 @@
     "a76a095964f8dafd392c0406fff0df3e",
     "ee23ced3d011905c14f65c687a28815b",
     "e289ed411c3b13773fa999263154c9ae",
-    "5376bf3255ea604d655392d01f202a31"
+    "5376bf3255ea604d655392d01f202a31",
+    "a385864410e512e8a9d1cc193335ebb9",
+    "a92c3f5b9504978db5bc9b9680964327",
+    "3f497ef9335e3b45d082815030452b76"
   ],
   "leftover_configs": [
     [
@@ -8494,6 +8497,9 @@
     "4b81fbf4962e3cbdee0b314450ded27e",
     "f0bb8d26a861350efd5ff0cbaf7cfd91",
     "dd9c2c10fc46bcabfe6dd7ef2891f39a",
+    "e052c26f2efcea38a0d5c8f80d7df9b7",
+    "5e2216a2ab524fa38ec0d37a6227c1a9",
+    "5cc483dbb1be75d28d5fda4d5a5b447d",
     "e052c26f2efcea38a0d5c8f80d7df9b7",
     "5e2216a2ab524fa38ec0d37a6227c1a9",
     "5cc483dbb1be75d28d5fda4d5a5b447d",
