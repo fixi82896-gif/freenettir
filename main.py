@@ -10,6 +10,7 @@ import hashlib
 import traceback
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
+from collections import Counter
 
 # تنظیمات متغیرهای محیطی
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -417,6 +418,7 @@ def main():
 
         sent_all_configs = []
         country_flags = {}
+        country_counter = Counter()
 
         delay_between_posts = int(3600 / len(config_batches)) if config_batches else 105
 
@@ -456,6 +458,7 @@ def main():
                 serial_str = f"[{history['last_serial']:06d}]"
                 country, flag = get_country_info(cfg)
                 country_flags[country] = flag
+                country_counter[country] += 1
 
                 ping_str = f" | ⚡️ {ping}" if ping else ""
                 final_cfg = f"{cfg}#{serial_str} - {flag} {country}{ping_str} | @freenettir"
@@ -506,32 +509,42 @@ def main():
         share_url = f"https://t.me/share/url?url=https://t.me/freenettir&text={share_text}"
         support_markup = {"inline_keyboard": [[{"text": "🏛️ اشتراک‌گذاری و حمایت از کانال", "url": share_url}]]}
 
-        config_file_name = "100_Latest_Servers.txt"
-        with open(config_file_name, "w", encoding="utf-8") as f:
-            f.write("\n\n".join(sent_all_configs))
-
         now_tehran = get_tehran_now()
         jy, jm, jd = gregorian_to_jalali(now_tehran.year, now_tehran.month, now_tehran.day)
         time_str = now_tehran.strftime("%H:%M")
         date_str = f"{jy}/{jm:02d}/{jd:02d}"
 
-        # چیدمان دو ستونه کشورها (پرچم اول + نام کشور بدون لوزی آبی)
+        # نام‌گذاری دینامیک فایل متنی بر اساس آیدی کانال، تاریخ و ساعت
+        channel_name_clean = CHANNEL.replace("@", "") if CHANNEL else "freenettir"
+        config_file_name = f"@{channel_name_clean}-{jy}-{jm:02d}-{jd:02d}-{now_tehran.hour:02d}-{now_tehran.minute:02d}.txt"
+
+        with open(config_file_name, "w", encoding="utf-8") as f:
+            f.write("\n\n".join(sent_all_configs))
+
+        # چیدمان منظم کشورها به همراه تعداد سرور هر کشور
         sorted_countries = sorted(country_flags.keys())
-        country_items = [f"{country_flags.get(country, '🌍')} {country}" for country in sorted_countries]
+        country_items = [f"{country_flags.get(c, '🌍')} {c} ({country_counter[c]})" for c in sorted_countries]
         stats_lines = []
         for i in range(0, len(country_items), 2):
             if i + 1 < len(country_items):
-                stats_lines.append(f"{country_items[i]}  |  {country_items[i+1]}")
+                stats_lines.append(f"{country_items[i]:<22} | {country_items[i+1]}")
             else:
                 stats_lines.append(f"{country_items[i]}")
         stats_text = "\n".join(stats_lines)
 
+        # کاور جدید و بهبود یافته فایل متنی
         config_caption = (
-            "💌 <b>100 سرور آخر کانال به صورت فایل متنی</b>\n\n"
-            f"📅 <b>آخرین آپدیت:</b> {time_str} | {date_str} 🇮🇷\n\n"
-            f"🌍 <b>پراکندگی کشورهای سرورها:</b>\n{stats_text}\n\n"
-            "🔥 شما می‌توانید با دانلود یا کپی کردن این فایل، تمامی سرورها را به صورت یکجا در برنامه وارد کنید.\n\n"
-            "🌐 <b>@freenettir  مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
+            "📦 <b>مجموعه ۱۰۰ سرور پرسرعت نهایی</b>\n"
+            "──────────────────\n"
+            f"📅 <b>تاریخ بروزرسانی:</b> {date_str}\n"
+            f"⏰ <b>ساعت انتشار:</b> {time_str} 🇮🇷\n"
+            "──────────────────\n\n"
+            f"🌍 <b>پراکندگی لوکیشن‌ها (تعداد):</b>\n"
+            f"<code>{stats_text}</code>\n\n"
+            "💡 <b>راهنمای سریع استفاده:</b>\n"
+            "فایل را دانلود کرده، در برنامه (v2rayNG / NekoBox / MahsaNG) از بخش <i>Import from File</i> وارد کنید.\n\n"
+            "🌐 <b>@freenettir | مرجع سرورهای رایگان</b>\n\n"
+            "🔹 #v2ray #vpn #proxy"
         )
 
         if os.path.exists(config_file_name):
@@ -547,7 +560,7 @@ def main():
                         },
                         files={"document": doc}
                     )
-                print("✅ فایل متنی ۱۰۰ سرور آخر به همراه کاور به کانال ارسال شد.")
+                print(f"✅ فایل متنی با نام {config_file_name} به همراه کاور به کانال ارسال شد.")
             except Exception as e:
                 print(f"⚠️ خطا در ارسال فایل متنی: {e}")
 
