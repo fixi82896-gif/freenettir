@@ -514,53 +514,52 @@ def main():
         time_str = now_tehran.strftime("%H:%M")
         date_str = f"{jy}/{jm:02d}/{jd:02d}"
 
-        # نام‌گذاری دینامیک فایل متنی بر اساس آیدی کانال، تاریخ و ساعت
         channel_name_clean = CHANNEL.replace("@", "") if CHANNEL else "freenettir"
         config_file_name = f"@{channel_name_clean}-{jy}-{jm:02d}-{jd:02d}-{now_tehran.hour:02d}-{now_tehran.minute:02d}.txt"
 
         with open(config_file_name, "w", encoding="utf-8") as f:
             f.write("\n\n".join(sent_all_configs))
 
-        # چیدمان منظم کشورها به همراه تعداد سرور هر کشور
-        sorted_countries = sorted(country_flags.keys())
-        country_items = [f"{country_flags.get(c, '🌍')} {c} ({country_counter[c]})" for c in sorted_countries]
+        # محدود کردن به ۸ کشور برتر جهت کوتاه نگه داشتن متن و عدم تجاوز از سقف ۱۰۲۴ کاراکتر
+        top_countries = country_counter.most_common(8)
+        compact_items = [f"{country_flags.get(c, '🌍')} {c} ({cnt})" for c, cnt in top_countries]
         stats_lines = []
-        for i in range(0, len(country_items), 2):
-            if i + 1 < len(country_items):
-                stats_lines.append(f"{country_items[i]:<22} | {country_items[i+1]}")
+        for i in range(0, len(compact_items), 2):
+            if i + 1 < len(compact_items):
+                stats_lines.append(f"{compact_items[i]}  |  {compact_items[i+1]}")
             else:
-                stats_lines.append(f"{country_items[i]}")
+                stats_lines.append(f"{compact_items[i]}")
         stats_text = "\n".join(stats_lines)
 
-        # کاور جدید و بهبود یافته فایل متنی
+        # کاور جدید، خلاصه و استاندارد (تضمین زیر ۱۰۲۴ کاراکتر)
         config_caption = (
             "📦 <b>مجموعه ۱۰۰ سرور پرسرعت نهایی</b>\n"
             "──────────────────\n"
-            f"📅 <b>تاریخ بروزرسانی:</b> {date_str}\n"
-            f"⏰ <b>ساعت انتشار:</b> {time_str} 🇮🇷\n"
+            f"📅 <b>تاریخ:</b> {date_str}  |  ⏰ <b>ساعت:</b> {time_str} 🇮🇷\n"
             "──────────────────\n\n"
-            f"🌍 <b>پراکندگی لوکیشن‌ها (تعداد):</b>\n"
-            f"<code>{stats_text}</code>\n\n"
-            "💡 <b>راهنمای سریع استفاده:</b>\n"
-            "فایل را دانلود کرده، در برنامه (v2rayNG / NekoBox / MahsaNG) از بخش <i>Import from File</i> وارد کنید.\n\n"
+            f"🌍 <b>لوکیشن‌های برتر:</b>\n"
+            f"{stats_text}\n\n"
+            "💡 <b>راهنما:</b> فایل را دانلود کرده و در برنامه (v2rayNG / NekoBox) از بخش Import File وارد کنید.\n\n"
             "🌐 <b>@freenettir | مرجع سرورهای رایگان</b>\n\n"
             "🔹 #v2ray #vpn #proxy"
         )
 
         if os.path.exists(config_file_name):
             try:
-                with open(config_file_name, "rb") as doc:
-                    send_telegram_with_retry(
-                        f"https://api.telegram.org/bot{TOKEN}/sendDocument",
-                        data={
-                            "chat_id": CHANNEL,
-                            "caption": config_caption,
-                            "parse_mode": "HTML",
-                            "reply_markup": json.dumps(support_markup)
-                        },
-                        files={"document": doc}
-                    )
-                print(f"✅ فایل متنی با نام {config_file_name} به همراه کاور به کانال ارسال شد.")
+                res = send_telegram_with_retry(
+                    f"https://api.telegram.org/bot{TOKEN}/sendDocument",
+                    data={
+                        "chat_id": CHANNEL,
+                        "caption": config_caption,
+                        "parse_mode": "HTML",
+                        "reply_markup": json.dumps(support_markup)
+                    },
+                    files={"document": open(config_file_name, "rb")}
+                )
+                if res and res.status_code == 200:
+                    print(f"✅ فایل متنی با نام {config_file_name} با موفقیت به کانال ارسال شد.")
+                else:
+                    print(f"⚠️ خطای ارسال فایل: کد {res.status_code if res else 'Unknown'} - {res.text if res else ''}")
             except Exception as e:
                 print(f"⚠️ خطا در ارسال فایل متنی: {e}")
 
