@@ -14,7 +14,8 @@ from collections import Counter
 
 # تنظیمات متغیرهای محیطی
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHANNEL = os.environ.get("TELEGRAM_CHANNEL")
+RAW_CHANNELS = os.environ.get("TELEGRAM_CHANNEL", "")
+CHANNELS = [c.strip() for c in RAW_CHANNELS.split(",") if c.strip()]
 ADMIN_ID = os.environ.get("TELEGRAM_ADMIN_ID")
 
 AD_BUTTON_TEXT = os.environ.get("AD_BUTTON_TEXT", "🚀 اتصال به پروکسی پرسرعت")
@@ -28,13 +29,11 @@ IP_CACHE = {}
 
 
 def get_tehran_now():
-    """محاسبه زمان جاری به وقت تهران"""
     tehran_tz = timezone(timedelta(hours=3, minutes=30))
     return datetime.now(tehran_tz)
 
 
 def gregorian_to_jalali(gy, gm, gd):
-    """مبدل دقیق و اصلاح‌شده تاریخ میلادی به شمسی"""
     g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
     if gy > 1600:
         jy = 979
@@ -61,12 +60,10 @@ def gregorian_to_jalali(gy, gm, gd):
 
 
 def get_md5(text):
-    """محاسبه هش MD5"""
     return hashlib.md5(text.encode('utf-8')).hexdigest()
 
 
 def extract_configs_from_text(text):
-    """استخراج کانفیگ‌ها و مقدار پینگ اختصاصی از متن ساده یا Base64"""
     results = []
     raw_text = text
 
@@ -93,7 +90,6 @@ def extract_configs_from_text(text):
 
 
 def extract_host_from_config(config_str):
-    """استخراج آدرس یا IP از انواع پروتکل‌ها شامل VMess"""
     try:
         if config_str.startswith("vmess://"):
             b64_data = config_str.replace("vmess://", "").strip()
@@ -111,7 +107,6 @@ def extract_host_from_config(config_str):
 
 
 def get_country_info(config_str):
-    """استخراج لوکیشن و پرچم با استفاده از سیستم Cache"""
     try:
         host = extract_host_from_config(config_str)
         if host:
@@ -131,7 +126,6 @@ def get_country_info(config_str):
 
 
 def send_telegram_with_retry(url, data=None, files=None, max_retries=3):
-    """ارسال به تلگرام همراه با مدیریت نرخ ارسال"""
     for attempt in range(max_retries):
         try:
             res = requests.post(url, data=data, files=files, timeout=15)
@@ -149,8 +143,7 @@ def send_telegram_with_retry(url, data=None, files=None, max_retries=3):
 
 
 def send_channel_maintenance_notice():
-    """ارسال پیام اطلاع‌رسانی توقف به کانال"""
-    if not TOKEN or not CHANNEL:
+    if not TOKEN or not CHANNELS:
         return
 
     notice_text = (
@@ -159,19 +152,19 @@ def send_channel_maintenance_notice():
         "با تشکر ؛ مدیریت کانال"
     )
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data={"chat_id": CHANNEL, "text": notice_text},
-            timeout=10
-        )
-        print("✅ پیام عذرخواهی و بازبینی به کانال ارسال شد.")
-    except Exception as e:
-        print(f"⚠️ خطا در ارسال پیام عذرخواهی به کانال: {e}")
+    for channel in CHANNELS:
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                data={"chat_id": channel, "text": notice_text},
+                timeout=10
+            )
+            print(f"✅ پیام عذرخواهی به کانال {channel} ارسال شد.")
+        except Exception as e:
+            print(f"⚠️ خطا در ارسال پیام عذرخواهی به کانال {channel}: {e}")
 
 
 def send_crash_telegram_admin(error_msg, full_traceback):
-    """ارسال گزارش کامل خطا به پیوی ادمین"""
     if not TOKEN or not ADMIN_ID:
         print("⚠️ آیدی ادمین تنظیم نشده است؛ خطای فنی فقط در لاگ ثبت شد.")
         return
@@ -203,7 +196,6 @@ def send_crash_telegram_admin(error_msg, full_traceback):
 
 
 def load_history():
-    """بارگیری تاریخچه از فایل موجود در ریپازیتوری"""
     history = {}
     if os.path.exists(HISTORY_FILE):
         try:
@@ -223,7 +215,6 @@ def load_history():
 
 
 def save_history(history):
-    """ذخیره محلی و بروزرسانی آنلاین فایل تاریخچه مستقیماً در ریپازیتوری گیت‌هاب"""
     history["sent_hashes"] = history["sent_hashes"][-5000:]
     history["sent_proxies_hashes"] = history["sent_proxies_hashes"][-5000:]
 
@@ -264,7 +255,6 @@ def save_history(history):
 
 
 def collect_configs(history):
-    """جمع‌آوری و پردازش کانفیگ‌ها به همراه پینگ"""
     print("\n🔍 در حال جمع‌آوری کانفیگ‌ها...")
     valid_configs = []
 
@@ -324,7 +314,6 @@ def collect_configs(history):
 
 
 def collect_proxies(history):
-    """جمع‌آوری و پردازش پروکسی‌ها"""
     print("📦 در حال جمع‌آوری پروکسی‌ها...")
     valid_proxies = history["leftover_proxies"]
     primary_proxies = []
@@ -378,14 +367,18 @@ def collect_proxies(history):
 
 
 def get_random_logo():
-    """انتخاب تصادفی لوگو"""
     logos = [f for f in os.listdir('.') if f.startswith('logo') and f.endswith('.jpg')]
     return random.choice(logos) if logos else None
 
 
 def main():
-    if not TOKEN or not CHANNEL:
+    if not TOKEN or not CHANNELS:
         raise ValueError("سکرت‌های TELEGRAM_BOT_TOKEN یا TELEGRAM_CHANNEL یافت نشدند!")
+
+    # =========================================================================
+    # 🧪 خط تست موقت (برای انجام تست این خط فعال است)
+    raise RuntimeError("تست سیستم هشدار ادمین و پیام عذرخواهی کانال")
+    # =========================================================================
 
     history = load_history()
     cycle_counter = 0
@@ -422,7 +415,7 @@ def main():
 
         delay_between_posts = int(3600 / len(config_batches)) if config_batches else 105
 
-        print(f"\n🚀 شروع ارسال تدریجی {len(config_batches)} پست به کانال (پایه هر {delay_between_posts} ثانیه)...")
+        print(f"\n🚀 شروع ارسال تدریجی {len(config_batches)} پست به کانال‌ها (پایه هر {delay_between_posts} ثانیه)...")
 
         for b_idx, batch_c in enumerate(config_batches):
             loop_start_time = time.time()
@@ -471,23 +464,24 @@ def main():
             post_text += "<b>🌐 @freenettir  مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
             logo = get_random_logo()
 
-            try:
-                if logo and os.path.exists(logo):
-                    with open(logo, 'rb') as photo_file:
+            for channel in CHANNELS:
+                try:
+                    if logo and os.path.exists(logo):
+                        with open(logo, 'rb') as photo_file:
+                            send_telegram_with_retry(
+                                f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                                data={"chat_id": channel, "caption": post_text, "parse_mode": "HTML", "reply_markup": json.dumps(reply_markup)},
+                                files={"photo": photo_file}
+                            )
+                    else:
                         send_telegram_with_retry(
-                            f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-                            data={"chat_id": CHANNEL, "caption": post_text, "parse_mode": "HTML", "reply_markup": json.dumps(reply_markup)},
-                            files={"photo": photo_file}
+                            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                            data={"chat_id": channel, "text": post_text, "parse_mode": "HTML", "reply_markup": json.dumps(reply_markup)}
                         )
-                else:
-                    send_telegram_with_retry(
-                        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                        data={"chat_id": CHANNEL, "text": post_text, "parse_mode": "HTML", "reply_markup": json.dumps(reply_markup)}
-                    )
-                print(f"✅ پارت {b_idx + 1} از {len(config_batches)} فرستاده شد. (سریال: {history['last_serial']})")
-            except Exception as e:
-                print(f"❌ خطا در ارسال پارت {b_idx + 1}: {e}")
+                except Exception as e:
+                    print(f"❌ خطا در ارسال پارت {b_idx + 1} به کانال {channel}: {e}")
 
+            print(f"✅ پارت {b_idx + 1} از {len(config_batches)} ارسال شد. (سریال: {history['last_serial']})")
             save_history(history)
 
             elapsed = time.time() - loop_start_time
@@ -496,12 +490,12 @@ def main():
             if b_idx < len(config_batches) - 1:
                 time.sleep(actual_sleep)
 
-        # --- انتهای ۶۰ دقیقه: ارسال فایل متنی سرورها ---
         print("\n📝 ۶۰ دقیقه ارسال تکمیل شد. ارسال استیکر و فایل متنی سرورها...")
-        try:
-            send_telegram_with_retry(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHANNEL, "text": "📝"})
-        except Exception:
-            pass
+        for channel in CHANNELS:
+            try:
+                send_telegram_with_retry(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": channel, "text": "📝"})
+            except Exception:
+                pass
 
         time.sleep(2)
 
@@ -514,13 +508,11 @@ def main():
         time_str = now_tehran.strftime("%H:%M")
         date_str = f"{jy}/{jm:02d}/{jd:02d}"
 
-        # نام‌گذاری ثابت و مطمئن فایل متنی با شروع @freenettir
         config_file_name = f"@freenettir-{jy}-{jm:02d}-{jd:02d}-{now_tehran.hour:02d}-{now_tehran.minute:02d}.txt"
 
         with open(config_file_name, "w", encoding="utf-8") as f:
             f.write("\n\n".join(sent_all_configs))
 
-        # محدود کردن به ۸ کشور برتر جهت کوتاه نگه داشتن متن و عدم تجاوز از سقف ۱۰۲۴ کاراکتر
         top_countries = country_counter.most_common(8)
         compact_items = [f"{country_flags.get(c, '🌍')} {c} ({cnt})" for c, cnt in top_countries]
         stats_lines = []
@@ -531,7 +523,6 @@ def main():
                 stats_lines.append(f"{compact_items[i]}")
         stats_text = "\n".join(stats_lines)
 
-        # کاور جدید، خلاصه و استاندارد (تضمین زیر ۱۰۲۴ کاراکتر)
         config_caption = (
             "📦 <b>مجموعه ۱۰۰ سرور پرسرعت نهایی</b>\n"
             "──────────────────\n"
@@ -545,23 +536,24 @@ def main():
         )
 
         if os.path.exists(config_file_name):
-            try:
-                res = send_telegram_with_retry(
-                    f"https://api.telegram.org/bot{TOKEN}/sendDocument",
-                    data={
-                        "chat_id": CHANNEL,
-                        "caption": config_caption,
-                        "parse_mode": "HTML",
-                        "reply_markup": json.dumps(support_markup)
-                    },
-                    files={"document": open(config_file_name, "rb")}
-                )
-                if res and res.status_code == 200:
-                    print(f"✅ فایل متنی با نام {config_file_name} با موفقیت به کانال ارسال شد.")
-                else:
-                    print(f"⚠️ خطای ارسال فایل: کد {res.status_code if res else 'Unknown'} - {res.text if res else ''}")
-            except Exception as e:
-                print(f"⚠️ خطا در ارسال فایل متنی: {e}")
+            for channel in CHANNELS:
+                try:
+                    res = send_telegram_with_retry(
+                        f"https://api.telegram.org/bot{TOKEN}/sendDocument",
+                        data={
+                            "chat_id": channel,
+                            "caption": config_caption,
+                            "parse_mode": "HTML",
+                            "reply_markup": json.dumps(support_markup)
+                        },
+                        files={"document": open(config_file_name, "rb")}
+                    )
+                    if res and res.status_code == 200:
+                        print(f"✅ فایل متنی با موفقیت به کانال {channel} ارسال شد.")
+                    else:
+                        print(f"⚠️ خطای ارسال فایل به {channel}: کد {res.status_code if res else 'Unknown'}")
+                except Exception as e:
+                    print(f"⚠️ خطا در ارسال فایل متنی به {channel}: {e}")
 
         print("\n😴 چرخه تمام شد؛ شروع ۳۰ دقیقه استراحت...")
         time.sleep(1800)
