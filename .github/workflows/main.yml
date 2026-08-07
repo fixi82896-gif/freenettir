@@ -1,9 +1,9 @@
-name: Run Telegram Bot
+name: Config Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */3 * * *'  # پشتیبان
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -16,14 +16,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install requests
 
-      - name: Run Telegram Bot
+      - name: Run Main Script
+        run: python main.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
@@ -32,4 +31,17 @@ jobs:
           AD_BUTTON_URL: ${{ secrets.AD_BUTTON_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python main.py
+
+      # 😴 استراحت ۳۰ دقیقه‌ای در گیت‌هاب قبل از چرخه بعدی
+      - name: Wait 30 Minutes
+        run: sleep 1800
+
+      # 🚀 فراخوانی چرخه بعدی
+      - name: Trigger Next Cycle
+        if: always()
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
+            -d '{"ref":"main"}'
