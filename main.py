@@ -484,7 +484,6 @@ def main():
                     print(f"❌ خطا در ارسال پارت {b_idx + 1} به کانال {channel}: {e}")
 
             print(f"✅ پارت {b_idx + 1} از {len(config_batches)} ارسال شد. (سریال: {history['last_serial']})")
-            save_history(history)
 
             elapsed = time.time() - loop_start_time
             actual_sleep = max(0, delay_between_posts - elapsed)
@@ -540,22 +539,26 @@ def main():
         if os.path.exists(config_file_name):
             for channel in CHANNELS:
                 try:
-                    res = send_telegram_with_retry(
-                        f"https://api.telegram.org/bot{TOKEN}/sendDocument",
-                        data={
-                            "chat_id": channel,
-                            "caption": config_caption,
-                            "parse_mode": "HTML",
-                            "reply_markup": json.dumps(support_markup)
-                        },
-                        files={"document": open(config_file_name, "rb")}
-                    )
+                    with open(config_file_name, "rb") as doc_file:
+                        res = send_telegram_with_retry(
+                            f"https://api.telegram.org/bot{TOKEN}/sendDocument",
+                            data={
+                                "chat_id": channel,
+                                "caption": config_caption,
+                                "parse_mode": "HTML",
+                                "reply_markup": json.dumps(support_markup)
+                            },
+                            files={"document": (config_file_name, doc_file)}
+                        )
                     if res and res.status_code == 200:
                         print(f"✅ فایل متنی با موفقیت به کانال {channel} ارسال شد.")
                     else:
                         print(f"⚠️ خطای ارسال فایل به {channel}: کد {res.status_code if res else 'Unknown'}")
                 except Exception as e:
                     print(f"⚠️ خطا در ارسال فایل متنی به {channel}: {e}")
+
+        # 💾 ذخیره آنلاین تاریخچه تنها یک‌بار در انتهای هر چرخه
+        save_history(history)
 
         print("\n😴 چرخه تمام شد؛ شروع ۳۰ دقیقه استراحت...")
         time.sleep(1800)
