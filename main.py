@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import re
+import html
 import random
 import base64
 import requests
@@ -176,23 +177,30 @@ def send_crash_telegram_admin(error_msg, full_traceback):
 
     tb_truncated = full_traceback[-2500:] if len(full_traceback) > 2500 else full_traceback
 
+    # 🛡️ امن‌سازی تگ‌های HTML برای جلوگیری از رد شدن توسط تلگرام
+    safe_error_msg = html.escape(str(error_msg))
+    safe_tb = html.escape(tb_truncated)
+
     alert_text = (
         f"🚨 <b>هشدار کرش ربات تلگرام (مخصوص ادمین)</b>\n\n"
         f"📅 <b>زمان وقوع:</b> {date_str} | {time_str} 🇮🇷\n\n"
-        f"❌ <b>علت خطا:</b>\n<code>{error_msg}</code>\n\n"
-        f"🔍 <b>جزئیات فنی (Traceback):</b>\n<pre>{tb_truncated}</pre>\n\n"
+        f"❌ <b>علت خطا:</b>\n<code>{safe_error_msg}</code>\n\n"
+        f"🔍 <b>جزئیات فنی (Traceback):</b>\n<pre>{safe_tb}</pre>\n\n"
         f"⚠️ لطفاً وضعیت ریپازیتوری را بررسی کنید."
     )
 
     try:
-        requests.post(
+        res = requests.post(
             f"https://api.telegram.org/bot{TOKEN}/sendMessage",
             data={"chat_id": ADMIN_ID, "text": alert_text, "parse_mode": "HTML"},
             timeout=10
         )
-        print("✅ گزارش خطای فنی با موفقیت به پیوی ادمین ارسال شد.")
+        if res.status_code == 200:
+            print("✅ گزارش خطای فنی با موفقیت به پیوی ادمین ارسال شد.")
+        else:
+            print(f"⚠️ خطای تلگرام در ارسال به ادمین (کد {res.status_code}): {res.text}")
     except Exception as e:
-        print(f"⚠️ خطا در ارسال گزارش به پیوی ادمین: {e}")
+        print(f"⚠️ خطا در ارتباط برای ارسال به ادمین: {e}")
 
 
 def load_history():
