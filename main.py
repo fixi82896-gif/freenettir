@@ -177,7 +177,6 @@ def send_crash_telegram_admin(error_msg, full_traceback):
 
     tb_truncated = full_traceback[-2500:] if len(full_traceback) > 2500 else full_traceback
 
-    # 🛡️ امن‌سازی تگ‌های HTML برای جلوگیری از رد شدن توسط تلگرام
     safe_error_msg = html.escape(str(error_msg))
     safe_tb = html.escape(tb_truncated)
 
@@ -382,11 +381,6 @@ def get_random_logo():
 def main():
     if not TOKEN or not CHANNELS:
         raise ValueError("سکرت‌های TELEGRAM_BOT_TOKEN یا TELEGRAM_CHANNEL یافت نشدند!")
-
-    # =========================================================================
-    # 🧪 خط تست موقت (برای انجام تست این خط فعال است)
-    raise RuntimeError("تست سیستم هشدار ادمین و پیام عذرخواهی کانال")
-    # =========================================================================
 
     history = load_history()
     cycle_counter = 0
