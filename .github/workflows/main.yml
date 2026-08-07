@@ -1,24 +1,13 @@
-name: Telegram Config Bot Runner
+name: Run Telegram Bot
 
 on:
+  workflow_dispatch:
   schedule:
-    # اجرا هر ۵ ساعت یک‌بار (برای زنده نگه داشتن مداوم ربات)
-    - cron: '0 */5 * * *'
-  workflow_dispatch: # امکان اجرای دستی از لبه Actions
-
-# مجوز دسترسی نوشتن به GITHUB_TOKEN جهت آپدیت فایل JSON تاریخچه
-permissions:
-  contents: write
-
-# جلوگیری از اجرای هم‌زمان دو ورک‌فلو و ایجاد تداخل
-concurrency:
-  group: telegram-bot-group
-  cancel-in-progress: true
+    - cron: '0 */6 * * *'
 
 jobs:
-  run-telegram-bot:
+  run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 350 # حداکثر زمان اجرای یک اکشن (کمی کمتر از ۶ ساعت محدودیت گیت‌هاب)
 
     steps:
       - name: Checkout Repository
