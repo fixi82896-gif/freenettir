@@ -28,6 +28,7 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 HISTORY_FILE = "sent_configs_history.json"
 IP_CACHE = {}
 
+# Session مشترک برای reuse کانکشن‌ها
 HTTP_SESSION = requests.Session()
 HTTP_SESSION.headers.update({"User-Agent": "Mozilla/5.0 (Bot Config Aggregator)"})
 
@@ -67,6 +68,26 @@ def get_md5(text):
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
+def update_vmess_remark(vmess_cfg, new_remark):
+    """بروزرسانی استاندارد نام سرور (ps) در کانفیگ‌های VMess بدون خراب کردن فایل JSON"""
+    try:
+        b64_data = vmess_cfg.replace("vmess://", "").strip().split("#")[0]
+        b64_data = b64_data.replace("-", "+").replace("_", "/")
+        b64_data += "=" * (-len(b64_data) % 4)
+
+        decoded = base64.b64decode(b64_data).decode("utf-8", errors="ignore")
+        json_data = json.loads(decoded)
+
+        # تغییر نام سرور داخل JSON
+        json_data["ps"] = new_remark
+
+        new_json_str = json.dumps(json_data, ensure_ascii=False)
+        new_b64 = base64.b64encode(new_json_str.encode("utf-8")).decode("utf-8")
+        return f"vmess://{new_b64}"
+    except Exception:
+        return vmess_cfg
+
+
 def extract_configs_from_text(text):
     results = []
     raw_text = text
@@ -96,7 +117,8 @@ def extract_configs_from_text(text):
 def extract_host_from_config(config_str):
     try:
         if config_str.startswith("vmess://"):
-            b64_data = config_str.replace("vmess://", "").strip()
+            b64_data = config_str.replace("vmess://", "").strip().split("#")[0]
+            b64_data = b64_data.replace("-", "+").replace("_", "/")
             b64_data += "=" * (-len(b64_data) % 4)
             decoded = base64.b64decode(b64_data).decode("utf-8", errors="ignore")
             json_data = json.loads(decoded)
@@ -119,6 +141,7 @@ def get_country_info(config_str):
         if host in IP_CACHE:
             return IP_CACHE[host]
 
+        # مدیریت Rate Limit
         time.sleep(0.6)
 
         res = HTTP_SESSION.get(
@@ -479,7 +502,14 @@ def main():
             country_counter[country] += 1
 
             ping_str = f" | ⚡️ {ping}" if ping else ""
-            final_cfg = f"{cfg}#{serial_str} - {flag} {country}{ping_str} | @freenettir"
+            remark = f"{serial_str} - {flag} {country}{ping_str} | @freenettir"
+
+            # 🛠️ اعمال فرمت اختصاصی VMess یا فرمت استاندارد برای بقیه پروتکل‌ها
+            if cfg.startswith("vmess://"):
+                final_cfg = update_vmess_remark(cfg, remark)
+            else:
+                final_cfg = f"{cfg}#{remark}"
+
             sent_all_configs.append(final_cfg)
 
             ping_display = f" (⚡️ پینگ: <code>{ping}</code>)" if ping else ""
@@ -608,12 +638,7 @@ def main():
     history["sent_proxies_hashes"] = list(sent_proxies_set)
     save_history(history)
 
-    # ---------------------------------------------------------------------
-    # 😴 شروع ۳۰ دقیقه استراحت
-    # ---------------------------------------------------------------------
-    print("\n😴 ۶۰ دقیقه ارسال + ارسال فایل متنی تمام شد. شروع ۳۰ دقیقه استراحت...")
-    time.sleep(1800)
-    print("✅ ۳۰ دقیقه استراحت تمام شد. خروج از برنامه برای شروع چرخه بعدی...")
+    print("\n✅ ارسال ۶۰ دقیقه‌ای و ثبت تاریخچه تکمیل شد. خروج برای شروع گام بعدی...")
 
 
 if __name__ == "__main__":
