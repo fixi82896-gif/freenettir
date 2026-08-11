@@ -67,8 +67,15 @@ def get_md5(text):
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
+def normalize_source_url(raw_input):
+    raw_input = raw_input.strip()
+    if "t.me/" in raw_input or raw_input.startswith("@") or not raw_input.startswith("http"):
+        clean_name = raw_input.replace("https://t.me/s/", "").replace("https://t.me/", "").replace("@", "").strip("/")
+        return f"https://t.me/s/{clean_name}"
+    return raw_input
+
+
 def update_vmess_remark(vmess_cfg, new_remark):
-    """ویرایش نام سرور در کلید ps داخل JSON برای VMess همراه با پشتیبانی از Fallback"""
     try:
         raw = vmess_cfg.replace("vmess://", "").strip().split("#")[0]
         raw = raw.replace("-", "+").replace("_", "/")
@@ -116,7 +123,6 @@ def extract_configs_from_text(text):
 
 
 def extract_host_port_from_config(config_str):
-    """استخراج IP/Host و Port جهت جلوگیری از ارسال سرور تکراری"""
     try:
         if config_str.startswith("vmess://"):
             b64_data = config_str.replace("vmess://", "").strip().split("#")[0]
@@ -149,7 +155,7 @@ def get_country_info(config_str):
         if host in IP_CACHE:
             return IP_CACHE[host]
 
-        time.sleep(0.5)
+        time.sleep(0.3)
 
         res = HTTP_SESSION.get(
             f"http://ip-api.com/json/{host}?fields=status,country,countryCode",
@@ -234,16 +240,151 @@ def send_crash_telegram_admin(error_msg, full_traceback):
         print(f"⚠️ خطا در گزارش به ادمین: {e}")
 
 
+# ─── پنل ادمین و مدیریت دکمه‌های تلگرام ─────────────────────────────
+def send_admin_panel(text="🛠 <b>پنل مدیریت منابع و کانفیگ‌ها</b>"):
+    if not TOKEN or not ADMIN_ID:
+        return
+
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "➕ افزودن منبع کانفیگ", "callback_data": "add_config_src"},
+                {"text": "➕ افزودن منبع پروکسی", "callback_data": "add_proxy_src"}
+            ],
+            [
+                {"text": "⚡️ افزودن مستقیم کانفیگ", "callback_data": "add_manual_config"},
+                {"text": "🚀 افزودن مستقیم پروکسی", "callback_data": "add_manual_proxy"}
+            ],
+            [
+                {"text": "📋 لیست منابع سفارشی", "callback_data": "list_sources"},
+                {"text": "🗑 پاکسازی منابع", "callback_data": "clear_sources"}
+            ]
+        ]
+    }
+
+    try:
+        HTTP_SESSION.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={
+                "chat_id": ADMIN_ID,
+                "text": text,
+                "parse_mode": "HTML",
+                "reply_markup": json.dumps(keyboard),
+            },
+            timeout=5,
+        )
+    except Exception as e:
+        print(f"⚠️ خطا در ارسال پنل مدیریت: {e}")
+
+
+def process_admin_updates(history):
+    """پردازش سریع و غیربلاک‌کننده پیام‌ها و کلیک‌های ادمین در تلگرام"""
+    if not TOKEN or not ADMIN_ID:
+        return
+
+    try:
+        offset = history.get("last_update_id", 0) + 1
+        res = HTTP_SESSION.get(
+            f"https://api.telegram.org/bot{TOKEN}/getUpdates",
+            params={"offset": offset, "timeout": 1, "limit": 20},
+            timeout=3,
+        ).json()
+
+        if not res.get("ok"):
+            return
+
+        for update in res.get("result", []):
+            history["last_update_id"] = update["update_id"]
+
+            # ۱. پردازش کلیک روی کیبورد
+            if "callback_query" in update:
+                cb = update["callback_query"]
+                if str(cb["from"]["id"]) == str(ADMIN_ID):
+                    data = cb["data"]
+                    if data == "add_config_src":
+                        history["bot_state"] = "WAITING_FOR_CONFIG_SRC"
+                        send_admin_panel("📥 لطفاً آیدی یا لینک کانال/منبع <b>کانفیگ</b> را ارسال کنید:\n(مثال: <code>@v2ray_configs_pool</code>)")
+                    elif data == "add_proxy_src":
+                        history["bot_state"] = "WAITING_FOR_PROXY_SRC"
+                        send_admin_panel("📥 لطفاً آیدی یا لینک کانال/منبع <b>پروکسی</b> را ارسال کنید:\n(مثال: <code>@ProxyMTProto</code>)")
+                    elif data == "add_manual_config":
+                        history["bot_state"] = "WAITING_FOR_MANUAL_CONFIG"
+                        send_admin_panel("⚡️ لطفاً کانفیگ یا متن حاوی کدهای V2Ray را ارسال کنید:\n(سیستم خودکار متن را پاکسازی کرده و پرچم/تگ می‌زند)")
+                    elif data == "add_manual_proxy":
+                        history["bot_state"] = "WAITING_FOR_MANUAL_PROXY"
+                        send_admin_panel("🚀 لطفاً لینک مستقیم پروکسی تلگرام را ارسال کنید:")
+                    elif data == "list_sources":
+                        cfg_s = "\n".join(history.get("custom_config_sources", [])) or "هیچ"
+                        prx_s = "\n".join(history.get("custom_proxy_sources", [])) or "هیچ"
+                        msg = f"<b>📋 منابع کانفیگ افزوده‌شده:</b>\n<code>{cfg_s}</code>\n\n<b>📦 منابع پروکسی افزوده‌شده:</b>\n<code>{prx_s}</code>"
+                        send_admin_panel(msg)
+                    elif data == "clear_sources":
+                        history["custom_config_sources"] = []
+                        history["custom_proxy_sources"] = []
+                        send_admin_panel("✅ تمامی منابع سفارشی حذف شدند.")
+
+            # ۲. پردازش ورودی‌های متنی ادمین
+            elif "message" in update:
+                msg = update["message"]
+                if str(msg["from"]["id"]) == str(ADMIN_ID) and "text" in msg:
+                    text = msg["text"].strip()
+                    state = history.get("bot_state")
+
+                    if text in ["/start", "/panel"]:
+                        history["bot_state"] = None
+                        send_admin_panel()
+
+                    elif state == "WAITING_FOR_CONFIG_SRC":
+                        normalized = normalize_source_url(text)
+                        if normalized not in history["custom_config_sources"]:
+                            history["custom_config_sources"].append(normalized)
+                            send_admin_panel(f"✅ منبع کانفیگ جدید اضافه شد:\n<code>{normalized}</code>")
+                        else:
+                            send_admin_panel("⚠️ این منبع قبلاً ثبت شده بود.")
+                        history["bot_state"] = None
+
+                    elif state == "WAITING_FOR_PROXY_SRC":
+                        normalized = normalize_source_url(text)
+                        if normalized not in history["custom_proxy_sources"]:
+                            history["custom_proxy_sources"].append(normalized)
+                            send_admin_panel(f"✅ منبع پروکسی جدید اضافه شد:\n<code>{normalized}</code>")
+                        else:
+                            send_admin_panel("⚠️ این منبع قبلاً ثبت شده بود.")
+                        history["bot_state"] = None
+
+                    elif state == "WAITING_FOR_MANUAL_CONFIG":
+                        found_cfgs = extract_configs_from_text(text)
+                        if found_cfgs:
+                            # قرار دادن در اولویت اول صف باقی‌مانده‌ها
+                            history["leftover_configs"] = found_cfgs + history.get("leftover_configs", [])
+                            send_admin_panel(f"✅ تعداد <b>{len(found_cfgs)}</b> کانفیگ دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
+                        else:
+                            send_admin_panel("❌ هیچ کد کانفیگ معتبری (vless, vmess, trojan, ss) در متن یافت نشد.")
+                        history["bot_state"] = None
+
+                    elif state == "WAITING_FOR_MANUAL_PROXY":
+                        found_pxs = re.findall(r'(https://t\.me/proxy\?[^\s#"\'>]+)', text)
+                        if found_pxs:
+                            history["leftover_proxies"] = found_pxs + history.get("leftover_proxies", [])
+                            send_admin_panel(f"✅ تعداد <b>{len(found_pxs)}</b> پروکسی دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
+                        else:
+                            send_admin_panel("❌ هیچ لینک پروکسی معتبری در متن یافت نشد.")
+                        history["bot_state"] = None
+
+    except Exception as e:
+        print(f"⚠️ خطا در بررسی آپدیت‌های ادمین: {e}")
+
+
+# ─── لایه ذخیره‌سازی داده‌ها ─────────────────────────────────────────
 def load_history():
     history = {}
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 history = json.load(f)
-                print("✅ تاریخچه با موفقیت از فایل بارگیری شد.")
+                print("✅ تاریخچه با موفقیت بارگیری شد.")
         except Exception as e:
             print(f"⚠️ خطا در خواندن تاریخچه: {e}")
-            history = {}
 
     history.setdefault("last_serial", 0)
     history.setdefault("sent_hashes", [])
@@ -251,6 +392,10 @@ def load_history():
     history.setdefault("leftover_configs", [])
     history.setdefault("leftover_proxies", [])
     history.setdefault("sent_proxies_hashes", [])
+    history.setdefault("custom_config_sources", [])
+    history.setdefault("custom_proxy_sources", [])
+    history.setdefault("last_update_id", 0)
+    history.setdefault("bot_state", None)
     return history
 
 
@@ -282,7 +427,7 @@ def save_history(history):
             content_b64 = base64.b64encode(json_str.encode("utf-8")).decode("utf-8")
 
             payload = {
-                "message": "🤖 بروزرسانی خودکار تاریخچه [Bot]",
+                "message": "🤖 بروزرسانی خودکار تاریخچه و منابع [Bot]",
                 "content": content_b64,
             }
             if sha:
@@ -292,13 +437,14 @@ def save_history(history):
             if put_res.status_code in [200, 201]:
                 print("✅ فایل تاریخچه در ریپازیتوری گیت‌هاب بروزرسانی شد.")
             else:
-                print(f"⚠️ خطای API گیت‌هاب در ثبت تاریخچه: کد {put_res.status_code}")
+                print(f"⚠️ خطای API گیت‌هاب: کد {put_res.status_code}")
         except Exception as e:
             print(f"⚠️ خطا در ارتباط با API گیت‌هاب: {e}")
 
 
+# ─── جمع‌آوری داده‌ها ───────────────────────────────────────────────
 def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
-    print("\n🔍 در حال جمع‌آوری کانفیگ‌ها از سورس‌های تازه...")
+    print("\n🔍 در حال جمع‌آوری کانفیگ‌ها...")
     valid_configs = []
 
     for item in history.get("leftover_configs", []):
@@ -309,7 +455,7 @@ def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
 
     seen_cfgs = set(c[0] for c in valid_configs)
 
-    github_sources = [
+    base_github_sources = [
         "https://manager.onetwothree123.ir/",
         "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/all_extracted_configs.txt",
         "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt",
@@ -318,10 +464,12 @@ def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
         "https://raw.githubusercontent.com/ts-indexer/sub-indexer/main/sub/mix",
         "https://raw.githubusercontent.com/yebekhe/TVC/main/subscriptions/xray/normal/mix",
         "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt",
-        "https://raw.githubusercontent.com/EbrahimAhar/V2ray-Config/main/All_Configs_Sub.txt"
+        "https://raw.githubusercontent.com/EbrahimAhar/V2ray-Config/main/All_Configs_Sub.txt",
     ]
 
-    for src in github_sources:
+    all_config_sources = base_github_sources + history.get("custom_config_sources", [])
+
+    for src in all_config_sources:
         try:
             r = HTTP_SESSION.get(src, timeout=10)
             if r.status_code == 200:
@@ -352,7 +500,7 @@ def collect_proxies(history, sent_proxies_set):
     valid_proxies = list(history.get("leftover_proxies", []))
     seen_proxies = set(valid_proxies)
 
-    proxy_sources = [
+    base_proxy_sources = [
         "https://office.onetwothree123.ir/",
         "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/mtproto/data.txt",
         "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
@@ -361,7 +509,9 @@ def collect_proxies(history, sent_proxies_set):
         "https://t.me/s/TelMTProto",
     ]
 
-    for p_src in proxy_sources:
+    all_proxy_sources = base_proxy_sources + history.get("custom_proxy_sources", [])
+
+    for p_src in all_proxy_sources:
         try:
             r = HTTP_SESSION.get(p_src, timeout=8)
             if r.status_code == 200:
@@ -398,11 +548,15 @@ def get_random_logo():
     return random.choice(logos) if logos else None
 
 
+# ─── نقطه ورود اصلی ────────────────────────────────────────────────
 def main():
     if not TOKEN or not CHANNELS:
         raise ValueError("سکرت‌های TELEGRAM_BOT_TOKEN یا TELEGRAM_CHANNEL یافت نشدند!")
 
     history = load_history()
+
+    # ۱. پردازش سریع دستورات و دکمه‌های ادمین
+    process_admin_updates(history)
 
     sent_hashes_set = set(history.get("sent_hashes", []))
     sent_ip_ports_set = set(history.get("sent_ip_ports", []))
@@ -418,7 +572,6 @@ def main():
 
     print(f"📊 کانفیگ‌های جدید آماده: {len(valid_configs)} | پروکسی‌های جدید: {len(valid_proxies)}")
 
-    # 🛑 برای زمان‌بندی دقیق ۶۰ دقیقه‌ای حداقل ۳۰ کانفیگ لازم است
     if len(valid_configs) < 30:
         print(f"⚠️ کانفیگ کافی ({len(valid_configs)} عدد) برای شروع چرخه وجود ندارد. خروج بدون ارسال.")
         history["leftover_configs"] = valid_configs
@@ -531,10 +684,8 @@ def main():
         if b_idx < len(config_batches) - 1:
             time.sleep(actual_sleep)
 
-    # ---------------------------------------------------------------------
-    # 📝 پایان ۶۰ دقیقه ارسال پست‌ها و ارسال فایل متنی نهایی
-    # ---------------------------------------------------------------------
-    print("\n📝 پایان ۶۰ دقیقه ارسال. ارسال فایل متنی سرورها...")
+    # 📝 پایان ارسال پست‌ها و ایجاد فایل متنی نهایی
+    print("\n📝 پایان ارسال پست‌ها. ارسال فایل متنی سرورها...")
     for channel in CHANNELS:
         try:
             send_telegram_with_retry(
@@ -601,9 +752,9 @@ def main():
                             files={"document": (config_file_name, doc_file)},
                         )
                     if res and res.status_code == 200:
-                        print(f"✅ فایل متنی با موفقیت به کانال {channel} ارسال شد.")
+                        print(f"✅ فایل متنی به کانال {channel} ارسال شد.")
                 except Exception as e:
-                    print(f"⚠️ خطا در ارسال فایل متنی به {channel}: {e}")
+                    print(f"⚠️ خطا در ارسال فایل به {channel}: {e}")
     finally:
         if os.path.exists(config_file_name):
             os.remove(config_file_name)
