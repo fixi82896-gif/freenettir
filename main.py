@@ -240,26 +240,19 @@ def send_crash_telegram_admin(error_msg, full_traceback):
         print(f"⚠️ خطا در گزارش به ادمین: {e}")
 
 
-# ─── پنل ادمین و مدیریت دکمه‌های تلگرام ─────────────────────────────
-def send_admin_panel(text="🛠 <b>پنل مدیریت منابع و کانفیگ‌ها</b>"):
+# ─── پنل ادمین کیبوردی و مدیریت حذف انتخابی ─────────────────────────
+def send_admin_keyboard(text="🛠 <b>پنل مدیریت ربات</b>"):
+    """ارسال صفحه کلید اصلی (Reply Keyboard) در پایین صفحه"""
     if not TOKEN or not ADMIN_ID:
         return
 
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {"text": "➕ افزودن منبع کانفیگ", "callback_data": "add_config_src"},
-                {"text": "➕ افزودن منبع پروکسی", "callback_data": "add_proxy_src"}
-            ],
-            [
-                {"text": "⚡️ افزودن مستقیم کانفیگ", "callback_data": "add_manual_config"},
-                {"text": "🚀 افزودن مستقیم پروکسی", "callback_data": "add_manual_proxy"}
-            ],
-            [
-                {"text": "📋 لیست منابع سفارشی", "callback_data": "list_sources"},
-                {"text": "🗑 پاکسازی منابع", "callback_data": "clear_sources"}
-            ]
-        ]
+    reply_keyboard = {
+        "keyboard": [
+            [{"text": "➕ افزودن منبع کانفیگ"}, {"text": "➕ افزودن منبع پروکسی"}],
+            [{"text": "⚡️ افزودن مستقیم کانفیگ"}, {"text": "🚀 افزودن مستقیم پروکسی"}],
+            [{"text": "📋 لیست و حذف منابع"}, {"text": "🔄 بروزرسانی پنل"}]
+        ],
+        "resize_keyboard": True
     }
 
     try:
@@ -269,16 +262,59 @@ def send_admin_panel(text="🛠 <b>پنل مدیریت منابع و کانفی�
                 "chat_id": ADMIN_ID,
                 "text": text,
                 "parse_mode": "HTML",
-                "reply_markup": json.dumps(keyboard),
+                "reply_markup": json.dumps(reply_keyboard),
             },
             timeout=5,
         )
     except Exception as e:
-        print(f"⚠️ خطا در ارسال پنل مدیریت: {e}")
+        print(f"⚠️ خطا در ارسال کیبورد ادمین: {e}")
+
+
+def send_sources_deletion_menu(history, text="📋 <b>لیست منابع سفارشی فعال:</b>\nجهت حذف هر منبع روی دکمه مربوط به آن کلیک کنید:"):
+    """ارسال لیست منابع همراه با دکمه اختصاصی حذف برای هر منبع"""
+    if not TOKEN or not ADMIN_ID:
+        return
+
+    inline_keyboard = []
+    cfg_sources = history.get("custom_config_sources", [])
+    prx_sources = history.get("custom_proxy_sources", [])
+
+    if cfg_sources:
+        inline_keyboard.append([{"text": "─── 📋 منابع کانفیگ ───", "callback_data": "ignore"}])
+        for idx, src in enumerate(cfg_sources):
+            display_name = src.replace("https://t.me/s/", "@")
+            inline_keyboard.append([{"text": f"❌ حذف {display_name}", "callback_data": f"del_cfg_{idx}"}])
+
+    if prx_sources:
+        inline_keyboard.append([{"text": "─── 📦 منابع پروکسی ───", "callback_data": "ignore"}])
+        for idx, src in enumerate(prx_sources):
+            display_name = src.replace("https://t.me/s/", "@")
+            inline_keyboard.append([{"text": f"❌ حذف {display_name}", "callback_data": f"del_prx_{idx}"}])
+
+    if not cfg_sources and not prx_sources:
+        text += "\n\n<i>هیچ منبع سفارشی تا کنون ثبت نشده است.</i>"
+
+    reply_markup = {"inline_keyboard": inline_keyboard} if inline_keyboard else None
+
+    try:
+        payload = {
+            "chat_id": ADMIN_ID,
+            "text": text,
+            "parse_mode": "HTML",
+        }
+        if reply_markup:
+            payload["reply_markup"] = json.dumps(reply_markup)
+
+        HTTP_SESSION.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data=payload,
+            timeout=5,
+        )
+    except Exception as e:
+        print(f"⚠️ خطا در ارسال لیست منابع: {e}")
 
 
 def answer_callback(cb_id, text=None):
-    """تایید کلیک روی دکمه شیشه‌ای جهت رفع حالت لودینگ در تلگرام"""
     try:
         HTTP_SESSION.post(
             f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
@@ -290,7 +326,7 @@ def answer_callback(cb_id, text=None):
 
 
 def process_admin_updates(history):
-    """پردازش سریع پیام‌ها و کلیک‌های ادمین در تلگرام"""
+    """پردازش کیبورد اصلی و کلیک‌های حذف انتخابی منابع"""
     if not TOKEN or not ADMIN_ID:
         return
 
@@ -308,81 +344,107 @@ def process_admin_updates(history):
         for update in res.get("result", []):
             history["last_update_id"] = update["update_id"]
 
-            # ۱. پردازش کلیک روی دکمه‌ها
+            # ۱. پردازش کلیک روی دکمه‌های حذف انتخابی (Inline)
             if "callback_query" in update:
                 cb = update["callback_query"]
                 if str(cb["from"]["id"]) == str(ADMIN_ID):
                     cb_id = cb["id"]
                     data = cb["data"]
-                    answer_callback(cb_id)
 
-                    if data == "add_config_src":
-                        history["bot_state"] = "WAITING_FOR_CONFIG_SRC"
-                        send_admin_panel("📥 لطفاً آیدی یا لینک کانال/منبع <b>کانفیگ</b> را ارسال کنید:\n(مثال: <code>@v2ray_configs_pool</code>)")
-                    elif data == "add_proxy_src":
-                        history["bot_state"] = "WAITING_FOR_PROXY_SRC"
-                        send_admin_panel("📥 لطفاً آیدی یا لینک کانال/منبع <b>پروکسی</b> را ارسال کنید:\n(مثال: <code>@ProxyMTProto</code>)")
-                    elif data == "add_manual_config":
-                        history["bot_state"] = "WAITING_FOR_MANUAL_CONFIG"
-                        send_admin_panel("⚡️ لطفاً کانفیگ یا متن حاوی کدهای V2Ray را ارسال کنید:\n(سیستم خودکار متن را پاکسازی کرده و پرچم/تگ می‌زند)")
-                    elif data == "add_manual_proxy":
-                        history["bot_state"] = "WAITING_FOR_MANUAL_PROXY"
-                        send_admin_panel("🚀 لطفاً لینک مستقیم پروکسی تلگرام را ارسال کنید:")
-                    elif data == "list_sources":
-                        cfg_s = "\n".join(history.get("custom_config_sources", [])) or "هیچ"
-                        prx_s = "\n".join(history.get("custom_proxy_sources", [])) or "هیچ"
-                        msg = f"<b>📋 منابع کانفیگ افزوده‌شده:</b>\n<code>{cfg_s}</code>\n\n<b>📦 منابع پروکسی افزوده‌شده:</b>\n<code>{prx_s}</code>"
-                        send_admin_panel(msg)
-                    elif data == "clear_sources":
-                        history["custom_config_sources"] = []
-                        history["custom_proxy_sources"] = []
-                        send_admin_panel("✅ تمامی منابع سفارشی حذف شدند.")
+                    if data == "ignore":
+                        answer_callback(cb_id)
+                        continue
 
-            # ۲. پردازش ورودی‌های متنی ادمین
+                    elif data.startswith("del_cfg_"):
+                        try:
+                            idx = int(data.split("_")[2])
+                            cfg_list = history.get("custom_config_sources", [])
+                            if 0 <= idx < len(cfg_list):
+                                removed = cfg_list.pop(idx)
+                                history["custom_config_sources"] = cfg_list
+                                answer_callback(cb_id, "منبع کانفیگ با موفقیت حذف شد.")
+                                send_sources_deletion_menu(history, f"✅ منبع <code>{removed}</code> با موفقیت حذف شد.\n\nلیست بروزرسانی شده:")
+                        except Exception as e:
+                            print(f"خطا در حذف منبع کانفیگ: {e}")
+
+                    elif data.startswith("del_prx_"):
+                        try:
+                            idx = int(data.split("_")[2])
+                            prx_list = history.get("custom_proxy_sources", [])
+                            if 0 <= idx < len(prx_list):
+                                removed = prx_list.pop(idx)
+                                history["custom_proxy_sources"] = prx_list
+                                answer_callback(cb_id, "منبع پروکسی با موفقیت حذف شد.")
+                                send_sources_deletion_menu(history, f"✅ منبع <code>{removed}</code> با موفقیت حذف شد.\n\nلیست بروزرسانی شده:")
+                        except Exception as e:
+                            print(f"خطا در حذف منبع پروکسی: {e}")
+
+            # ۲. پردازش دکمه‌های کیبورد اصلی تلگرام (Reply Keyboard)
             elif "message" in update:
                 msg = update["message"]
                 if str(msg["from"]["id"]) == str(ADMIN_ID) and "text" in msg:
                     text = msg["text"].strip()
                     state = history.get("bot_state")
 
-                    if text in ["/start", "/panel"]:
+                    if text in ["/start", "/panel", "🔄 بروزرسانی پنل"]:
                         history["bot_state"] = None
-                        send_admin_panel()
+                        send_admin_keyboard("🔄 پنل مدیریت بروزرسانی شد.")
 
+                    elif text == "➕ افزودن منبع کانفیگ":
+                        history["bot_state"] = "WAITING_FOR_CONFIG_SRC"
+                        send_admin_keyboard("📥 لطفاً آیدی یا لینک کانال/منبع <b>کانفیگ</b> را ارسال کنید:\n(مثال: <code>@v2ray_configs_pool</code>)")
+
+                    elif text == "➕ افزودن منبع پروکسی":
+                        history["bot_state"] = "WAITING_FOR_PROXY_SRC"
+                        send_admin_keyboard("📥 لطفاً آیدی یا لینک کانال/منبع <b>پروکسی</b> را ارسال کنید:\n(مثال: <code>@ProxyMTProto</code>)")
+
+                    elif text == "⚡️ افزودن مستقیم کانفیگ":
+                        history["bot_state"] = "WAITING_FOR_MANUAL_CONFIG"
+                        send_admin_keyboard("⚡️ لطفاً کانفیگ یا متن حاوی کدهای V2Ray را ارسال کنید:")
+
+                    elif text == "🚀 افزودن مستقیم پروکسی":
+                        history["bot_state"] = "WAITING_FOR_MANUAL_PROXY"
+                        send_admin_keyboard("🚀 لطفاً لینک مستقیم پروکسی تلگرام را ارسال کنید:")
+
+                    elif text == "📋 لیست و حذف منابع":
+                        history["bot_state"] = None
+                        send_sources_deletion_menu(history)
+
+                    # پردازش متون ارسالی بر اساس حالت (State)
                     elif state == "WAITING_FOR_CONFIG_SRC":
                         normalized = normalize_source_url(text)
                         if normalized not in history["custom_config_sources"]:
                             history["custom_config_sources"].append(normalized)
-                            send_admin_panel(f"✅ منبع کانفیگ جدید اضافه شد:\n<code>{normalized}</code>")
+                            send_admin_keyboard(f"✅ منبع کانفیگ جدید اضافه شد:\n<code>{normalized}</code>")
                         else:
-                            send_admin_panel("⚠️ این منبع قبلاً ثبت شده بود.")
+                            send_admin_keyboard("⚠️ این منبع قبلاً ثبت شده بود.")
                         history["bot_state"] = None
 
                     elif state == "WAITING_FOR_PROXY_SRC":
                         normalized = normalize_source_url(text)
                         if normalized not in history["custom_proxy_sources"]:
                             history["custom_proxy_sources"].append(normalized)
-                            send_admin_panel(f"✅ منبع پروکسی جدید اضافه شد:\n<code>{normalized}</code>")
+                            send_admin_keyboard(f"✅ منبع پروکسی جدید اضافه شد:\n<code>{normalized}</code>")
                         else:
-                            send_admin_panel("⚠️ این منبع قبلاً ثبت شده بود.")
+                            send_admin_keyboard("⚠️ این منبع قبلاً ثبت شده بود.")
                         history["bot_state"] = None
 
                     elif state == "WAITING_FOR_MANUAL_CONFIG":
                         found_cfgs = extract_configs_from_text(text)
                         if found_cfgs:
                             history["leftover_configs"] = found_cfgs + history.get("leftover_configs", [])
-                            send_admin_panel(f"✅ تعداد <b>{len(found_cfgs)}</b> کانفیگ دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
+                            send_admin_keyboard(f"✅ تعداد <b>{len(found_cfgs)}</b> کانفیگ دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
                         else:
-                            send_admin_panel("❌ هیچ کد کانفیگ معتبری (vless, vmess, trojan, ss) در متن یافت نشد.")
+                            send_admin_keyboard("❌ هیچ کد کانفیگ معتبری (vless, vmess, trojan, ss) در متن یافت نشد.")
                         history["bot_state"] = None
 
                     elif state == "WAITING_FOR_MANUAL_PROXY":
                         found_pxs = re.findall(r'(https://t\.me/proxy\?[^\s#"\'>]+)', text)
                         if found_pxs:
                             history["leftover_proxies"] = found_pxs + history.get("leftover_proxies", [])
-                            send_admin_panel(f"✅ تعداد <b>{len(found_pxs)}</b> پروکسی دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
+                            send_admin_keyboard(f"✅ تعداد <b>{len(found_pxs)}</b> پروکسی دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
                         else:
-                            send_admin_panel("❌ هیچ لینک پروکسی معتبری در متن یافت نشد.")
+                            send_admin_keyboard("❌ هیچ لینک پروکسی معتبری در متن یافت نشد.")
                         history["bot_state"] = None
 
     except Exception as e:
@@ -390,7 +452,7 @@ def process_admin_updates(history):
 
 
 def smart_sleep(seconds, history):
-    """خواب هوشمند که در طول آن پیام‌ها و دکمه‌های ادمین پردازش می‌شوند"""
+    """خواب هوشمند بدون بلاک شدن پاسخ‌دهی به ادمین"""
     start_t = time.time()
     while time.time() - start_t < seconds:
         process_admin_updates(history)
@@ -577,10 +639,10 @@ def main():
 
     history = load_history()
 
-    # ارسال خودکار پنل به ادمین در ابتدای اجرای اسکریپت
-    send_admin_panel("🚀 <b>ربات فعال شد!</b>\nاز پنل زیر برای مدیریت منابع استفاده کنید:")
+    # فعال‌سازی و ارسال صفحه کلید اصلی مدیریت
+    send_admin_keyboard("🚀 <b>ربات فعال شد!</b>\nاز صفحه کلید زیر جهت مدیریت منابع استفاده کنید:")
 
-    # بررسی پیام‌های قبلی ادمین
+    # بررسی آپدیت‌های اولیه
     process_admin_updates(history)
 
     sent_hashes_set = set(history.get("sent_hashes", []))
@@ -707,7 +769,6 @@ def main():
         actual_sleep = max(0, delay_between_posts - elapsed)
 
         if b_idx < len(config_batches) - 1:
-            # استفاده از خواب هوشمند جهت پردازش کلیک‌ها حین ارسال پارت‌ها
             smart_sleep(actual_sleep, history)
 
     # 📝 پایان ارسال پست‌ها و ایجاد فایل متنی نهایی
