@@ -277,8 +277,20 @@ def send_admin_panel(text="🛠 <b>پنل مدیریت منابع و کانفی�
         print(f"⚠️ خطا در ارسال پنل مدیریت: {e}")
 
 
+def answer_callback(cb_id, text=None):
+    """تایید کلیک روی دکمه شیشه‌ای جهت رفع حالت لودینگ در تلگرام"""
+    try:
+        HTTP_SESSION.post(
+            f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
+            data={"callback_query_id": cb_id, "text": text or ""},
+            timeout=3,
+        )
+    except Exception:
+        pass
+
+
 def process_admin_updates(history):
-    """پردازش سریع و غیربلاک‌کننده پیام‌ها و کلیک‌های ادمین در تلگرام"""
+    """پردازش سریع پیام‌ها و کلیک‌های ادمین در تلگرام"""
     if not TOKEN or not ADMIN_ID:
         return
 
@@ -296,11 +308,14 @@ def process_admin_updates(history):
         for update in res.get("result", []):
             history["last_update_id"] = update["update_id"]
 
-            # ۱. پردازش کلیک روی کیبورد
+            # ۱. پردازش کلیک روی دکمه‌ها
             if "callback_query" in update:
                 cb = update["callback_query"]
                 if str(cb["from"]["id"]) == str(ADMIN_ID):
+                    cb_id = cb["id"]
                     data = cb["data"]
+                    answer_callback(cb_id)
+
                     if data == "add_config_src":
                         history["bot_state"] = "WAITING_FOR_CONFIG_SRC"
                         send_admin_panel("📥 لطفاً آیدی یا لینک کانال/منبع <b>کانفیگ</b> را ارسال کنید:\n(مثال: <code>@v2ray_configs_pool</code>)")
@@ -355,7 +370,6 @@ def process_admin_updates(history):
                     elif state == "WAITING_FOR_MANUAL_CONFIG":
                         found_cfgs = extract_configs_from_text(text)
                         if found_cfgs:
-                            # قرار دادن در اولویت اول صف باقی‌مانده‌ها
                             history["leftover_configs"] = found_cfgs + history.get("leftover_configs", [])
                             send_admin_panel(f"✅ تعداد <b>{len(found_cfgs)}</b> کانفیگ دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
                         else:
@@ -373,6 +387,14 @@ def process_admin_updates(history):
 
     except Exception as e:
         print(f"⚠️ خطا در بررسی آپدیت‌های ادمین: {e}")
+
+
+def smart_sleep(seconds, history):
+    """خواب هوشمند که در طول آن پیام‌ها و دکمه‌های ادمین پردازش می‌شوند"""
+    start_t = time.time()
+    while time.time() - start_t < seconds:
+        process_admin_updates(history)
+        time.sleep(2)
 
 
 # ─── لایه ذخیره‌سازی داده‌ها ─────────────────────────────────────────
@@ -555,7 +577,10 @@ def main():
 
     history = load_history()
 
-    # ۱. پردازش سریع دستورات و دکمه‌های ادمین
+    # ارسال خودکار پنل به ادمین در ابتدای اجرای اسکریپت
+    send_admin_panel("🚀 <b>ربات فعال شد!</b>\nاز پنل زیر برای مدیریت منابع استفاده کنید:")
+
+    # بررسی پیام‌های قبلی ادمین
     process_admin_updates(history)
 
     sent_hashes_set = set(history.get("sent_hashes", []))
@@ -682,7 +707,8 @@ def main():
         actual_sleep = max(0, delay_between_posts - elapsed)
 
         if b_idx < len(config_batches) - 1:
-            time.sleep(actual_sleep)
+            # استفاده از خواب هوشمند جهت پردازش کلیک‌ها حین ارسال پارت‌ها
+            smart_sleep(actual_sleep, history)
 
     # 📝 پایان ارسال پست‌ها و ایجاد فایل متنی نهایی
     print("\n📝 پایان ارسال پست‌ها. ارسال فایل متنی سرورها...")
@@ -695,7 +721,7 @@ def main():
         except Exception:
             pass
 
-    time.sleep(2)
+    smart_sleep(2, history)
 
     share_text = quote("🚀 آخرین سرورها و پروکسی‌های پرسرعت رایگان را در کانال ما دنبال کنید:")
     share_url = f"https://t.me/share/url?url=https://t.me/freenettir&text={share_text}"
