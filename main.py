@@ -240,9 +240,50 @@ def send_crash_telegram_admin(error_msg, full_traceback):
         print(f"⚠️ خطا در گزارش به ادمین: {e}")
 
 
+def record_source_status(src, is_success, history):
+    """پایش سلامت منابع و حذف خودکار پس از ۳ روز متوالی خطا همراه با اطلاع به ادمین"""
+    failures = history.setdefault("source_failures", {})
+    today_str = get_tehran_now().strftime("%Y-%m-%d")
+
+    if is_success:
+        if src in failures:
+            del failures[src]
+        return
+
+    data = failures.get(src, {"count": 0, "last_date": ""})
+    if data["last_date"] != today_str:
+        data["count"] += 1
+        data["last_date"] = today_str
+        failures[src] = data
+
+    if data["count"] >= 3:
+        removed = False
+        if src in history.get("custom_config_sources", []):
+            history["custom_config_sources"].remove(src)
+            removed = True
+        if src in history.get("custom_proxy_sources", []):
+            history["custom_proxy_sources"].remove(src)
+            removed = True
+
+        if removed:
+            del failures[src]
+            alert_msg = (
+                f"🚨 <b>حذف خودکار منبع از دست‌رفته</b>\n\n"
+                f"منبع زیر به دلیل <b>۳ روز متوالی خطا</b> به‌صورت خودکار از لیست منابع سفارشی حذف شد:\n\n"
+                f"<code>{html.escape(src)}</code>"
+            )
+            try:
+                HTTP_SESSION.post(
+                    f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                    data={"chat_id": ADMIN_ID, "text": alert_msg, "parse_mode": "HTML"},
+                    timeout=5,
+                )
+            except Exception as e:
+                print(f"⚠️ خطا در ارسال گزارش حذف منبع به ادمین: {e}")
+
+
 # ─── پنل ادمین کیبوردی و مدیریت حذف انتخابی ─────────────────────────
 def send_admin_keyboard(text="🛠 <b>پنل مدیریت ربات</b>"):
-    """ارسال صفحه کلید اصلی (Reply Keyboard) در پایین صفحه"""
     if not TOKEN or not ADMIN_ID:
         return
 
@@ -271,7 +312,6 @@ def send_admin_keyboard(text="🛠 <b>پنل مدیریت ربات</b>"):
 
 
 def send_sources_deletion_menu(history, text="📋 <b>لیست منابع سفارشی فعال:</b>\nجهت حذف هر منبع روی دکمه مربوط به آن کلیک کنید:"):
-    """ارسال لیست منابع همراه با دکمه اختصاصی حذف برای هر منبع"""
     if not TOKEN or not ADMIN_ID:
         return
 
@@ -326,7 +366,6 @@ def answer_callback(cb_id, text=None):
 
 
 def process_admin_updates(history):
-    """پردازش کیبورد اصلی و کلیک‌های حذف انتخابی منابع"""
     if not TOKEN or not ADMIN_ID:
         return
 
@@ -344,7 +383,6 @@ def process_admin_updates(history):
         for update in res.get("result", []):
             history["last_update_id"] = update["update_id"]
 
-            # ۱. پردازش کلیک روی دکمه‌های حذف انتخابی (Inline)
             if "callback_query" in update:
                 cb = update["callback_query"]
                 if str(cb["from"]["id"]) == str(ADMIN_ID):
@@ -379,7 +417,6 @@ def process_admin_updates(history):
                         except Exception as e:
                             print(f"خطا در حذف منبع پروکسی: {e}")
 
-            # ۲. پردازش دکمه‌های کیبورد اصلی تلگرام (Reply Keyboard)
             elif "message" in update:
                 msg = update["message"]
                 if str(msg["from"]["id"]) == str(ADMIN_ID) and "text" in msg:
@@ -410,7 +447,6 @@ def process_admin_updates(history):
                         history["bot_state"] = None
                         send_sources_deletion_menu(history)
 
-                    # پردازش متون ارسالی بر اساس حالت (State)
                     elif state == "WAITING_FOR_CONFIG_SRC":
                         normalized = normalize_source_url(text)
                         if normalized not in history["custom_config_sources"]:
@@ -433,16 +469,16 @@ def process_admin_updates(history):
                         found_cfgs = extract_configs_from_text(text)
                         if found_cfgs:
                             history["leftover_configs"] = found_cfgs + history.get("leftover_configs", [])
-                            send_admin_keyboard(f"✅ تعداد <b>{len(found_cfgs)}</b> کانفیگ دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
+                            send_admin_keyboard(f"✅ تعداد <b>{len(found_cfgs)}</b> کانفیگ دریافت شد و در اولویت ارسال قرار گرفت.")
                         else:
-                            send_admin_keyboard("❌ هیچ کد کانفیگ معتبری (vless, vmess, trojan, ss) در متن یافت نشد.")
+                            send_admin_keyboard("❌ هیچ کد کانفیگ معتبری در متن یافت نشد.")
                         history["bot_state"] = None
 
                     elif state == "WAITING_FOR_MANUAL_PROXY":
                         found_pxs = re.findall(r'(https://t\.me/proxy\?[^\s#"\'>]+)', text)
                         if found_pxs:
                             history["leftover_proxies"] = found_pxs + history.get("leftover_proxies", [])
-                            send_admin_keyboard(f"✅ تعداد <b>{len(found_pxs)}</b> پروکسی دریافت شد و در اولویت ارسال پارت بعدی قرار گرفت.")
+                            send_admin_keyboard(f"✅ تعداد <b>{len(found_pxs)}</b> پروکسی دریافت شد و در اولویت ارسال قرار گرفت.")
                         else:
                             send_admin_keyboard("❌ هیچ لینک پروکسی معتبری در متن یافت نشد.")
                         history["bot_state"] = None
@@ -452,7 +488,6 @@ def process_admin_updates(history):
 
 
 def smart_sleep(seconds, history):
-    """خواب هوشمند بدون بلاک شدن پاسخ‌دهی به ادمین"""
     start_t = time.time()
     while time.time() - start_t < seconds:
         process_admin_updates(history)
@@ -478,6 +513,7 @@ def load_history():
     history.setdefault("sent_proxies_hashes", [])
     history.setdefault("custom_config_sources", [])
     history.setdefault("custom_proxy_sources", [])
+    history.setdefault("source_failures", {})
     history.setdefault("last_update_id", 0)
     history.setdefault("bot_state", None)
     return history
@@ -551,12 +587,13 @@ def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
         "https://raw.githubusercontent.com/EbrahimAhar/V2ray-Config/main/All_Configs_Sub.txt",
     ]
 
-    all_config_sources = base_github_sources + history.get("custom_config_sources", [])
+    all_config_sources = base_github_sources + list(history.get("custom_config_sources", []))
 
     for src in all_config_sources:
         try:
             r = HTTP_SESSION.get(src, timeout=10)
             if r.status_code == 200:
+                record_source_status(src, True, history)
                 found = extract_configs_from_text(r.text)
                 for cfg, ping in found:
                     cfg_hash = get_md5(cfg)
@@ -571,8 +608,12 @@ def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
 
                     if len(valid_configs) >= 200:
                         break
+            else:
+                record_source_status(src, False, history)
         except Exception as e:
+            record_source_status(src, False, history)
             print(f"⚠️ خطا در خواندن منبع {src}: {e}")
+
         if len(valid_configs) >= 200:
             break
 
@@ -593,12 +634,13 @@ def collect_proxies(history, sent_proxies_set):
         "https://t.me/s/TelMTProto",
     ]
 
-    all_proxy_sources = base_proxy_sources + history.get("custom_proxy_sources", [])
+    all_proxy_sources = base_proxy_sources + list(history.get("custom_proxy_sources", []))
 
     for p_src in all_proxy_sources:
         try:
             r = HTTP_SESSION.get(p_src, timeout=8)
             if r.status_code == 200:
+                record_source_status(p_src, True, history)
                 found_p = re.findall(r'(https://t\.me/proxy\?[^\s#"\'>]+)', r.text)
                 for p in found_p:
                     p_hash = get_md5(p)
@@ -607,8 +649,12 @@ def collect_proxies(history, sent_proxies_set):
                         seen_proxies.add(p)
                     if len(valid_proxies) >= 150:
                         break
+            else:
+                record_source_status(p_src, False, history)
         except Exception as e:
+            record_source_status(p_src, False, history)
             print(f"⚠️ خطا در خواندن منبع پروکسی {p_src}: {e}")
+
         if len(valid_proxies) >= 150:
             break
 
@@ -639,10 +685,8 @@ def main():
 
     history = load_history()
 
-    # فعال‌سازی و ارسال صفحه کلید اصلی مدیریت
     send_admin_keyboard("🚀 <b>ربات فعال شد!</b>\nاز صفحه کلید زیر جهت مدیریت منابع استفاده کنید:")
 
-    # بررسی آپدیت‌های اولیه
     process_admin_updates(history)
 
     sent_hashes_set = set(history.get("sent_hashes", []))
@@ -771,7 +815,6 @@ def main():
         if b_idx < len(config_batches) - 1:
             smart_sleep(actual_sleep, history)
 
-    # 📝 پایان ارسال پست‌ها و ایجاد فایل متنی نهایی
     print("\n📝 پایان ارسال پست‌ها. ارسال فایل متنی سرورها...")
     for channel in CHANNELS:
         try:
