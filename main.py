@@ -19,8 +19,10 @@ RAW_CHANNELS = os.environ.get("TELEGRAM_CHANNEL", "")
 CHANNELS = [c.strip() for c in RAW_CHANNELS.split(",") if c.strip()]
 ADMIN_ID = os.environ.get("TELEGRAM_ADMIN_ID")
 
-AD_BUTTON_TEXT = os.environ.get("AD_BUTTON_TEXT", "🚀 اتصال به پروکسی پرسرعت")
-AD_BUTTON_URL = os.environ.get("AD_BUTTON_URL", "https://t.me/freenettir")
+DEFAULT_CHANNEL_URL = "https://t.me/freenettir"
+DEFAULT_SHARE_TEXT = quote("🚀 آخرین سرورها و پروکسی‌های پرسرعت رایگان را در کانال ما دنبال کنید:")
+DEFAULT_SUPPORT_URL = f"https://t.me/share/url?url={DEFAULT_CHANNEL_URL}&text={DEFAULT_SHARE_TEXT}"
+DEFAULT_AD_TEXT = "🏛️ اشتراک‌گذاری و حمایت از کانال"
 
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
@@ -155,7 +157,7 @@ def get_country_info(config_str):
         if host in IP_CACHE:
             return IP_CACHE[host]
 
-        time.sleep(0.3)
+        time.sleep(1.4)
 
         res = HTTP_SESSION.get(
             f"http://ip-api.com/json/{host}?fields=status,country,countryCode",
@@ -241,7 +243,6 @@ def send_crash_telegram_admin(error_msg, full_traceback):
 
 
 def record_source_status(src, is_success, history):
-    """پایش سلامت منابع و حذف خودکار پس از ۳ روز متوالی خطا همراه با اطلاع به ادمین"""
     failures = history.setdefault("source_failures", {})
     today_str = get_tehran_now().strftime("%Y-%m-%d")
 
@@ -282,7 +283,7 @@ def record_source_status(src, is_success, history):
                 print(f"⚠️ خطا در ارسال گزارش حذف منبع به ادمین: {e}")
 
 
-# ─── پنل ادمین کیبوردی و مدیریت حذف انتخابی ─────────────────────────
+# ─── پنل ادمین و مدیریت دکمه تبلیغات ───────────────────────────────
 def send_admin_keyboard(text="🛠 <b>پنل مدیریت ربات</b>"):
     if not TOKEN or not ADMIN_ID:
         return
@@ -291,7 +292,8 @@ def send_admin_keyboard(text="🛠 <b>پنل مدیریت ربات</b>"):
         "keyboard": [
             [{"text": "➕ افزودن منبع کانفیگ"}, {"text": "➕ افزودن منبع پروکسی"}],
             [{"text": "⚡️ افزودن مستقیم کانفیگ"}, {"text": "🚀 افزودن مستقیم پروکسی"}],
-            [{"text": "📋 لیست و حذف منابع"}, {"text": "🔄 بروزرسانی پنل"}]
+            [{"text": "📋 لیست و حذف منابع"}, {"text": "⚙️ مدیریت دکمه تبلیغات"}],
+            [{"text": "🔄 بروزرسانی پنل"}]
         ],
         "resize_keyboard": True
     }
@@ -309,6 +311,40 @@ def send_admin_keyboard(text="🛠 <b>پنل مدیریت ربات</b>"):
         )
     except Exception as e:
         print(f"⚠️ خطا در ارسال کیبورد ادمین: {e}")
+
+
+def send_ad_management_menu(history, text=None):
+    if not TOKEN or not ADMIN_ID:
+        return
+
+    ad_text = history.get("ad_button_text", DEFAULT_AD_TEXT)
+    ad_url = history.get("ad_button_url", DEFAULT_SUPPORT_URL)
+
+    if not text:
+        text = (
+            f"⚙️ <b>تنظیمات فعلی دکمه تبلیغات / حمایت:</b>\n\n"
+            f"🏷 <b>متن دکمه:</b> <code>{html.escape(ad_text)}</code>\n"
+            f"🔗 <b>لینک/محتوا:</b> <code>{html.escape(ad_url)}</code>"
+        )
+
+    inline_keyboard = [
+        [{"text": "✏️ تغییر متن و لینک تبلیغات", "callback_data": "change_ad_text_url"}],
+        [{"text": "🔄 بازنشانی به حالت پیش‌فرض (حمایت از کانال)", "callback_data": "reset_ad_button"}]
+    ]
+
+    try:
+        HTTP_SESSION.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={
+                "chat_id": ADMIN_ID,
+                "text": text,
+                "parse_mode": "HTML",
+                "reply_markup": json.dumps({"inline_keyboard": inline_keyboard})
+            },
+            timeout=5,
+        )
+    except Exception as e:
+        print(f"⚠️ خطا در ارسال منوی تبلیغات: {e}")
 
 
 def send_sources_deletion_menu(history, text="📋 <b>لیست منابع سفارشی فعال:</b>\nجهت حذف هر منبع روی دکمه مربوط به آن کلیک کنید:"):
@@ -393,6 +429,17 @@ def process_admin_updates(history):
                         answer_callback(cb_id)
                         continue
 
+                    elif data == "change_ad_text_url":
+                        history["bot_state"] = "WAITING_FOR_AD_TEXT"
+                        answer_callback(cb_id)
+                        send_admin_keyboard("🏷 لطفاً **متن جدید دکمه تبلیغات** را ارسال کنید:")
+
+                    elif data == "reset_ad_button":
+                        history["ad_button_text"] = DEFAULT_AD_TEXT
+                        history["ad_button_url"] = DEFAULT_SUPPORT_URL
+                        answer_callback(cb_id, "دکمه تبلیغات با موفقیت به حالت پیش‌فرض بازنشانی شد.")
+                        send_ad_management_menu(history, "✅ <b>دکمه تبلیغات با موفقیت به حالت حمایت از کانال بازنشانی شد.</b>")
+
                     elif data.startswith("del_cfg_"):
                         try:
                             idx = int(data.split("_")[2])
@@ -400,7 +447,7 @@ def process_admin_updates(history):
                             if 0 <= idx < len(cfg_list):
                                 removed = cfg_list.pop(idx)
                                 history["custom_config_sources"] = cfg_list
-                                answer_callback(cb_id, "منبع کانفیگ با موفقیت حذف شد.")
+                                answer_callback(cb_id, "منبع کانفیگ حذف شد.")
                                 send_sources_deletion_menu(history, f"✅ منبع <code>{removed}</code> با موفقیت حذف شد.\n\nلیست بروزرسانی شده:")
                         except Exception as e:
                             print(f"خطا در حذف منبع کانفیگ: {e}")
@@ -412,7 +459,7 @@ def process_admin_updates(history):
                             if 0 <= idx < len(prx_list):
                                 removed = prx_list.pop(idx)
                                 history["custom_proxy_sources"] = prx_list
-                                answer_callback(cb_id, "منبع پروکسی با موفقیت حذف شد.")
+                                answer_callback(cb_id, "منبع پروکسی حذف شد.")
                                 send_sources_deletion_menu(history, f"✅ منبع <code>{removed}</code> با موفقیت حذف شد.\n\nلیست بروزرسانی شده:")
                         except Exception as e:
                             print(f"خطا در حذف منبع پروکسی: {e}")
@@ -446,6 +493,10 @@ def process_admin_updates(history):
                     elif text == "📋 لیست و حذف منابع":
                         history["bot_state"] = None
                         send_sources_deletion_menu(history)
+
+                    elif text == "⚙️ مدیریت دکمه تبلیغات":
+                        history["bot_state"] = None
+                        send_ad_management_menu(history)
 
                     elif state == "WAITING_FOR_CONFIG_SRC":
                         normalized = normalize_source_url(text)
@@ -483,6 +534,25 @@ def process_admin_updates(history):
                             send_admin_keyboard("❌ هیچ لینک پروکسی معتبری در متن یافت نشد.")
                         history["bot_state"] = None
 
+                    elif state == "WAITING_FOR_AD_TEXT":
+                        history["temp_ad_text"] = text
+                        history["bot_state"] = "WAITING_FOR_AD_URL"
+                        send_admin_keyboard("🔗 لطفاً **لینک یا آیدی اختصاصی** دکمه تبلیغات را ارسال کنید:\n(مثال: <code>https://t.me/my_channel</code> یا <code>@my_channel</code>)")
+
+                    elif state == "WAITING_FOR_AD_URL":
+                        target_url = text
+                        if target_url.startswith("@"):
+                            target_url = f"https://t.me/{target_url.replace('@', '')}"
+                        elif not target_url.startswith("http"):
+                            target_url = f"https://t.me/{target_url}"
+
+                        history["ad_button_text"] = history.get("temp_ad_text", DEFAULT_AD_TEXT)
+                        history["ad_button_url"] = target_url
+                        history["bot_state"] = None
+
+                        send_admin_keyboard("✅ دکمه تبلیغات جدید با موفقیت تنظیم و فعال شد.")
+                        send_ad_management_menu(history)
+
     except Exception as e:
         print(f"⚠️ خطا در بررسی آپدیت‌های ادمین: {e}")
 
@@ -514,6 +584,8 @@ def load_history():
     history.setdefault("custom_config_sources", [])
     history.setdefault("custom_proxy_sources", [])
     history.setdefault("source_failures", {})
+    history.setdefault("ad_button_text", DEFAULT_AD_TEXT)
+    history.setdefault("ad_button_url", DEFAULT_SUPPORT_URL)
     history.setdefault("last_update_id", 0)
     history.setdefault("bot_state", None)
     return history
@@ -745,9 +817,13 @@ def main():
         p1 = batch_p[0] if len(batch_p) > 0 else default_proxy
         p2 = batch_p[1] if len(batch_p) > 1 else p1
 
+        ad_text = history.get("ad_button_text", DEFAULT_AD_TEXT)
+        ad_url = history.get("ad_button_url", DEFAULT_SUPPORT_URL)
+
+        # چیدمان دقیق ۳ دکمه شیشه‌ای (۲ پروکسی و ۱ تبلیغ/حمایت)
         keyboard_buttons = [
             [{"text": "🚀 اتصال به پروکسی", "url": p1}, {"text": "🚀 اتصال به پروکسی", "url": p2}],
-            [{"text": AD_BUTTON_TEXT, "url": AD_BUTTON_URL}],
+            [{"text": ad_text, "url": ad_url}],
         ]
         reply_markup = {"inline_keyboard": keyboard_buttons}
 
@@ -827,10 +903,8 @@ def main():
 
     smart_sleep(2, history)
 
-    share_text = quote("🚀 آخرین سرورها و پروکسی‌های پرسرعت رایگان را در کانال ما دنبال کنید:")
-    share_url = f"https://t.me/share/url?url=https://t.me/freenettir&text={share_text}"
     support_markup = {
-        "inline_keyboard": [[{"text": "🏛️ اشتراک‌گذاری و حمایت از کانال", "url": share_url}]]
+        "inline_keyboard": [[{"text": "🏛️ اشتراک‌گذاری و حمایت از کانال", "url": DEFAULT_SUPPORT_URL}]]
     }
 
     now_tehran = get_tehran_now()
