@@ -7,6 +7,9 @@ on:
       - 'proxy_utils.py'
       - 'test_proxy_utils.py'
       - 'test_proxy_pipeline.py'
+      - 'proxy_health.py'
+      - 'test_proxy_health.py'
+      - '.github/workflows/main.yml'
       - '.github/workflows/proxy-checks.yml'
   workflow_dispatch:
 
@@ -22,8 +25,8 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install bot dependency for isolated tests
-        run: python -m pip install requests
+        run: python -m pip install requests "mtproxy-checker @ git+https://github.com/alimghmi/mtproxychecker.git@80224c93c47242575107c83eb603d675e49226e8"
       - name: Compile bot and proxy helper (no bot execution)
-        run: python -m py_compile main.py proxy_utils.py
+        run: python -m py_compile main.py proxy_utils.py proxy_health.py
       - name: Test proxy extraction (no Telegram messages)
-        run: python -m unittest -v test_proxy_utils test_proxy_pipeline
+        run: python -m unittest -v test_proxy_utils test_proxy_pipeline test_proxy_health
