@@ -51,17 +51,21 @@ class AdminOnlySourceTests(unittest.TestCase):
         self.assertEqual(items,[existing])
         get.assert_not_called()
 
-    def test_existing_panel_sources_and_history_defaults_are_preserved(self):
+    def test_loaded_panel_sources_and_history_are_preserved(self):
+        import tempfile
+        import os
+        import json
         original={"custom_config_sources":["https://example.org/a"],
                   "custom_proxy_sources":["https://t.me/s/one"],
                   "last_serial":12345,"sent_proxies_hashes":["abcdef"],"leftover_proxies":["fake"]}
-        with patch.object(main,"HISTORY_FILE","/this/path/does-not-exist"):
-            restored=main.load_history()  # fallback defaults only; never edits file
-        self.assertEqual(restored["custom_config_sources"],[])
-        # Explicitly demonstrate the production dict schema remains unchanged.
-        self.assertIn("custom_config_sources",original)
-        self.assertIn("custom_proxy_sources",original)
-        self.assertEqual(original["last_serial"],12345)
+        with tempfile.TemporaryDirectory() as folder:
+            history_file=os.path.join(folder,"history.json")
+            with open(history_file,"w",encoding="utf-8") as out:
+                json.dump(original,out)
+            with patch.object(main,"HISTORY_FILE",history_file):
+                restored=main.load_history()
+        for key,value in original.items():
+            self.assertEqual(restored[key],value)
 
 if __name__=="__main__":
     unittest.main()
