@@ -60,7 +60,7 @@ class ProxyPoolTests(unittest.TestCase):
         ))
         history = {"custom_proxy_sources": [], "leftover_proxies": [], "recent_proxy_pool": []}
         hashes = {main.get_md5(proxy(1)), main.get_md5(proxy(2))}
-        with patch.object(main.HTTP_SESSION, "get", return_value=response), patch.object(main, "record_source_status"):
+        with patch.object(main.HTTP_SESSION, "get", return_value=response), patch.object(main, "record_source_status"), patch.object(main, "verify_mtproto_pool", side_effect=lambda c: c):
             pool = main.collect_proxies(history, hashes)
         self.assertEqual(set(pool), {proxy(1), proxy(2)})
         self.assertEqual(len(history["recent_proxy_pool"]), 2)

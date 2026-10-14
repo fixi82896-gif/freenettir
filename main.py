@@ -14,6 +14,7 @@ from urllib.parse import quote
 from collections import Counter
 from proxy_utils import (extract_proxy_links, extract_socks5_endpoints, normalize_proxy_link,
                          refresh_proxy_cache, plan_proxy_buttons)
+from proxy_health import verify_mtproto_pool, verified_buttons_for_post
 
 # ─── تنظیمات محیطی ───────────────────────────────────────────────
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -749,24 +750,29 @@ def collect_proxies(history, sent_proxies_set):
     archive = refresh_proxy_cache(
         history.get("recent_proxy_pool", []), observed_proxies, int(time.time())
     )
-    history["recent_proxy_pool"] = archive
     candidates = [entry["url"] for entry in archive]
 
-    # Preserve previously queued proxy URLs as a last resort for compatibility.
+    # Historical links must be revalidated. Never trust previous sends or cache age.
     for raw_proxy in history.get("leftover_proxies", []):
         proxy = normalize_proxy_link(raw_proxy)
         if proxy and proxy not in candidates and len(candidates) < 180:
             candidates.append(proxy)
 
-    never_sent = [p for p in candidates if get_md5(p) not in sent_proxies_set]
-    previously_sent = [p for p in candidates if get_md5(p) in sent_proxies_set]
+    # Only a real MTProto handshake and Telegram resPQ confirmation can enter the
+    # publishing pool. Public SOCKS5 endpoints remain sources but are excluded
+    # until a SOCKS-to-Telegram connectivity verifier is implemented.
+    verified_proxies = verify_mtproto_pool(candidates)
+    now_epoch = int(time.time())
+    history["recent_proxy_pool"] = [
+        {"url": link, "seen_at": now_epoch} for link in verified_proxies
+    ]
+    never_sent = [p for p in verified_proxies if get_md5(p) not in sent_proxies_set]
+    previously_sent = [p for p in verified_proxies if get_md5(p) in sent_proxies_set]
     valid_proxies = never_sent + previously_sent
-
     print(
-        f"📊 پروکسی‌های قابل استفاده در صف: {len(valid_proxies)}"
-        f" | لینک‌های جدید: {len(never_sent)}"
-        f" | قابل استفاده مجدد: {len(previously_sent)}"
-        " (تنها ساختار لینک بررسی شده؛ اتصال زنده آزمایش نشده)"
+        f"📊 پروکسی‌های تأییدشده واقعی: {len(valid_proxies)}"
+        f" | استفاده‌نشده: {len(never_sent)}"
+        f" | قابل تکرار پس از تأیید مجدد: {len(previously_sent)}"
     )
     return valid_proxies
 
@@ -824,6 +830,7 @@ def main():
     proxy_batches, next_offset = plan_proxy_buttons(
         valid_proxies, len(config_batches), history.get("proxy_rotation_offset", 0)
     )
+    verified_at = {url: time.time() for url in valid_proxies}
     history["proxy_rotation_offset"] = next_offset
     history["leftover_proxies"] = valid_proxies[min(len(valid_proxies), len(config_batches) * 2):]
     reused_button_count = sum(len(batch) for batch in proxy_batches) - min(
@@ -845,7 +852,23 @@ def main():
     for b_idx, batch_c in enumerate(config_batches):
         loop_start_time = time.time()
 
-        batch_p = list(proxy_batches[b_idx]) if b_idx < len(proxy_batches) else []
+        planned_proxies = list(proxy_batches[b_idx]) if b_idx < len(proxy_batches) else []
+        # A proxy can go down during this one-hour cycle. Refresh aged validation.
+        batch_p = verified_buttons_for_post(
+            planned_proxies, valid_proxies, verified_at,
+        )
+        if not batch_p:
+            print("🚨 توقف امن: هیچ پروکسی با اتصال واقعی تلگرام برای این پست تأیید نشد.")
+            # Save the unposted configurations, preserving serials and sent history.
+            history["leftover_configs"] = (
+                cycle_configs[b_idx * 3:] + history.get("leftover_configs", [])
+            )[:300]
+            history["sent_hashes"] = list(sent_hashes_set)
+            history["sent_ip_ports"] = list(sent_ip_ports_set)
+            history["sent_proxies_hashes"] = list(sent_proxies_set)
+            save_history(history)
+            return
+
         ad_text = history.get("ad_button_text", DEFAULT_AD_TEXT)
         ad_url = history.get("ad_button_url", DEFAULT_SUPPORT_URL)
 
