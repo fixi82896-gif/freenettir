@@ -58,7 +58,7 @@ class ProxyPoolTests(unittest.TestCase):
             '<a href="https://t.me/proxy?server=host1.example.org&amp;port=443&amp;secret=dd0123456789abcdef0123456789abcdef">A</a>'
             '<a href="https://t.me/proxy?server=host2.example.org&amp;port=443&amp;secret=dd0123456789abcdef0123456789abcdef">B</a>'
         ))
-        history = {"custom_proxy_sources": [], "leftover_proxies": [], "recent_proxy_pool": []}
+        history = {"custom_proxy_sources": ["https://t.me/s/admin-proxies"], "leftover_proxies": [], "recent_proxy_pool": []}
         hashes = {main.get_md5(proxy(1)), main.get_md5(proxy(2))}
         with patch.object(main.HTTP_SESSION, "get", return_value=response), patch.object(main, "record_source_status"), patch.object(main, "verify_mtproto_pool", side_effect=lambda c: c):
             pool = main.collect_proxies(history, hashes)
