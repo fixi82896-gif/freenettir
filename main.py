@@ -350,47 +350,96 @@ def send_ad_management_menu(history, text=None):
         print(f"⚠️ خطا در ارسال منوی تبلیغات: {e}")
 
 
-def send_sources_deletion_menu(history, text="📋 <b>لیست منابع سفارشی فعال:</b>\nجهت حذف هر منبع روی دکمه مربوط به آن کلیک کنید:"):
-    if not TOKEN or not ADMIN_ID:
-        return
+def source_menu_token(source):
+    """Stable identifier: stale keyboards cannot delete a different list item."""
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:20]
 
-    inline_keyboard = []
+
+def build_sources_deletion_menu(history, expanded=0, notice=None):
+    """Build independent, initially collapsed configuration/proxy panels."""
+    expanded = int(expanded) & 3
     cfg_sources = history.get("custom_config_sources", [])
     prx_sources = history.get("custom_proxy_sources", [])
+    text = (
+        "📋 <b>لیست و حذف منابع</b>\\n"
+        "برای نمایش منابع، بخش موردنظر را باز کنید.\\n"
+        "برای بستن همان بخش دوباره روی عنوان آن بزنید."
+    )
+    if notice:
+        text += "\\n\\n" + html.escape(notice)
 
-    if cfg_sources:
-        inline_keyboard.append([{"text": "─── 📋 منابع کانفیگ ───", "callback_data": "ignore"}])
-        for idx, src in enumerate(cfg_sources):
-            display_name = src.replace("https://t.me/s/", "@")
-            inline_keyboard.append([{"text": f"❌ حذف {display_name}", "callback_data": f"del_cfg_{idx}"}])
+    keyboard = []
+    for key, bit, title, sources, kind in (
+        ("cfg", 1, "📋 منابع کانفیگ", cfg_sources, "cfg"),
+        ("prx", 2, "📦 منابع پروکسی", prx_sources, "prx"),
+    ):
+        opened = bool(expanded & bit)
+        arrow = "🔽" if opened else "▶️"
+        keyboard.append([{
+            "text": f"{arrow} {title} ({len(sources)})",
+            "callback_data": f"src_menu_{expanded ^ bit}",
+        }])
+        if opened:
+            if not sources:
+                keyboard.append([{
+                    "text": "— هنوز منبعی ثبت نشده است —",
+                    "callback_data": "ignore",
+                }])
+            else:
+                for source in sources:
+                    label = source.replace("https://t.me/s/", "@")
+                    if len(label) > 55:
+                        label = label[:52] + "…"
+                    keyboard.append([{
+                        "text": f"❌ حذف {label}",
+                        "callback_data": f"src_del_{kind}_{expanded}_{source_menu_token(source)}",
+                    }])
+    return text, {"inline_keyboard": keyboard}
 
-    if prx_sources:
-        inline_keyboard.append([{"text": "─── 📦 منابع پروکسی ───", "callback_data": "ignore"}])
-        for idx, src in enumerate(prx_sources):
-            display_name = src.replace("https://t.me/s/", "@")
-            inline_keyboard.append([{"text": f"❌ حذف {display_name}", "callback_data": f"del_prx_{idx}"}])
 
-    if not cfg_sources and not prx_sources:
-        text += "\n\n<i>هیچ منبع سفارشی تا کنون ثبت نشده است.</i>"
+def delete_source_by_token(history, kind, token):
+    """Delete only when exactly one current source matches the callback token."""
+    field = {"cfg": "custom_config_sources", "prx": "custom_proxy_sources"}.get(kind)
+    if not field or len(token) != 20 or not re.fullmatch(r"[a-f0-9]{20}", token):
+        return None
+    sources = history.get(field, [])
+    matches = [i for i, source in enumerate(sources) if source_menu_token(source) == token]
+    if len(matches) != 1:
+        return None
+    return sources.pop(matches[0])
 
-    reply_markup = {"inline_keyboard": inline_keyboard} if inline_keyboard else None
+
+def send_sources_deletion_menu(history, expanded=0, message_id=None, notice=None):
+    """Open or edit the SAME Telegram menu message; never duplicate on toggle."""
+    if not TOKEN or not ADMIN_ID:
+        return False
+
+    text, markup = build_sources_deletion_menu(history, expanded=expanded, notice=notice)
+    editing = message_id is not None
+    endpoint = "editMessageText" if editing else "sendMessage"
+    payload = {
+        "chat_id": ADMIN_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "reply_markup": json.dumps(markup, ensure_ascii=False),
+    }
+    if editing:
+        payload["message_id"] = message_id
 
     try:
-        payload = {
-            "chat_id": ADMIN_ID,
-            "text": text,
-            "parse_mode": "HTML",
-        }
-        if reply_markup:
-            payload["reply_markup"] = json.dumps(reply_markup)
-
-        HTTP_SESSION.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        response = HTTP_SESSION.post(
+            f"https://api.telegram.org/bot{TOKEN}/{endpoint}",
             data=payload,
             timeout=5,
         )
-    except Exception as e:
-        print(f"⚠️ خطا در ارسال لیست منابع: {e}")
+        if response.status_code != 200 or not response.json().get("ok"):
+            description = response.json().get("description", "")
+            print(f"⚠️ خطا در نمایش منوی منابع ({endpoint}): {description}")
+            return False
+        return True
+    except Exception as exc:
+        print(f"⚠️ خطا در نمایش منوی منابع: {exc}")
+        return False
 
 
 def answer_callback(cb_id, text=None):
@@ -432,6 +481,44 @@ def process_admin_updates(history):
                         answer_callback(cb_id)
                         continue
 
+                    elif data.startswith("src_menu_"):
+                        mask_text = data.removeprefix("src_menu_")
+                        if mask_text in ("0", "1", "2", "3"):
+                            answer_callback(cb_id)
+                            send_sources_deletion_menu(
+                                history, expanded=int(mask_text),
+                                message_id=cb.get("message", {}).get("message_id"),
+                            )
+                        else:
+                            answer_callback(cb_id, "دکمه نامعتبر است؛ منو را دوباره باز کنید.")
+
+                    elif data.startswith("src_del_"):
+                        parts = data.split("_", 4)
+                        if len(parts) == 5 and parts[2] in ("cfg", "prx") and parts[3] in ("0", "1", "2", "3"):
+                            kind, expanded, token = parts[2], int(parts[3]), parts[4]
+                            removed = delete_source_by_token(history, kind, token)
+                            if removed is None:
+                                answer_callback(cb_id, "منبع پیدا نشد؛ شاید فهرست قبلاً تغییر کرده است.")
+                                notice = "⚠️ این منبع قبلاً حذف شده یا فهرست تغییر کرده است."
+                            else:
+                                answer_callback(cb_id, "منبع حذف شد.")
+                                notice = f"✅ منبع {removed} حذف شد."
+                            send_sources_deletion_menu(
+                                history, expanded=expanded,
+                                message_id=cb.get("message", {}).get("message_id"),
+                                notice=notice,
+                            )
+                        else:
+                            answer_callback(cb_id, "درخواست حذف معتبر نیست.")
+
+                    elif data.startswith(("del_cfg_", "del_prx_")):
+                        # Legacy index-based buttons may refer to a different source now.
+                        # Fail closed instead of accidentally deleting an unrelated source.
+                        answer_callback(cb_id, "این منو قدیمی است؛ فهرست تازه را باز کنید.")
+                        send_sources_deletion_menu(
+                            history, message_id=cb.get("message", {}).get("message_id"),
+                        )
+
                     elif data == "change_ad_text_url":
                         history["bot_state"] = "WAITING_FOR_AD_TEXT"
                         answer_callback(cb_id)
@@ -442,30 +529,6 @@ def process_admin_updates(history):
                         history["ad_button_url"] = DEFAULT_SUPPORT_URL
                         answer_callback(cb_id, "دکمه تبلیغات با موفقیت به حالت پیش‌فرض بازنشانی شد.")
                         send_ad_management_menu(history, "✅ <b>دکمه تبلیغات با موفقیت به حالت حمایت از کانال بازنشانی شد.</b>")
-
-                    elif data.startswith("del_cfg_"):
-                        try:
-                            idx = int(data.split("_")[2])
-                            cfg_list = history.get("custom_config_sources", [])
-                            if 0 <= idx < len(cfg_list):
-                                removed = cfg_list.pop(idx)
-                                history["custom_config_sources"] = cfg_list
-                                answer_callback(cb_id, "منبع کانفیگ حذف شد.")
-                                send_sources_deletion_menu(history, f"✅ منبع <code>{removed}</code> با موفقیت حذف شد.\n\nلیست بروزرسانی شده:")
-                        except Exception as e:
-                            print(f"خطا در حذف منبع کانفیگ: {e}")
-
-                    elif data.startswith("del_prx_"):
-                        try:
-                            idx = int(data.split("_")[2])
-                            prx_list = history.get("custom_proxy_sources", [])
-                            if 0 <= idx < len(prx_list):
-                                removed = prx_list.pop(idx)
-                                history["custom_proxy_sources"] = prx_list
-                                answer_callback(cb_id, "منبع پروکسی حذف شد.")
-                                send_sources_deletion_menu(history, f"✅ منبع <code>{removed}</code> با موفقیت حذف شد.\n\nلیست بروزرسانی شده:")
-                        except Exception as e:
-                            print(f"خطا در حذف منبع پروکسی: {e}")
 
             elif "message" in update:
                 msg = update["message"]
