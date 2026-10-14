@@ -109,3 +109,60 @@ def extract_socks5_endpoints(content):
             found.append(url)
             seen.add(url)
     return found
+
+
+def refresh_proxy_cache(previous, discovered, now_epoch, max_age_seconds=8 * 3600, max_items=180):
+    """Keep a bounded, time-limited fallback of recently observed proxy URLs.
+
+    This only checks syntax. It cannot guarantee that a server is still online.
+    """
+    fresh = []
+    known = set()
+    for raw in discovered:
+        url = normalize_proxy_link(raw)
+        if url and url not in known:
+            known.add(url)
+            fresh.append({"url": url, "seen_at": int(now_epoch)})
+            if len(fresh) >= max_items:
+                break
+
+    older = []
+    for entry in previous if isinstance(previous, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        url = normalize_proxy_link(entry.get("url"))
+        try:
+            seen_at = int(entry.get("seen_at", 0))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        age = now_epoch - seen_at
+        if url and url not in known and 0 <= age <= max_age_seconds:
+            older.append({"url": url, "seen_at": seen_at})
+            known.add(url)
+    older.sort(key=lambda item: item["seen_at"], reverse=True)
+    return (fresh + older)[:max_items]
+
+
+def plan_proxy_buttons(proxy_urls, post_count, rotation_offset=0):
+    """Assign up to two distinct proxies per post; reuse only across posts.
+
+    Returns (batches, new_rotation_offset). Never fabricate a proxy/channel link.
+    """
+    if post_count < 0:
+        raise ValueError("post_count must not be negative")
+    urls = []
+    seen = set()
+    for candidate in proxy_urls:
+        url = normalize_proxy_link(candidate)
+        if url and url not in seen:
+            urls.append(url)
+            seen.add(url)
+    if not urls:
+        return ([[] for _ in range(post_count)], 0)
+    count = min(2, len(urls))
+    offset = int(rotation_offset) % len(urls)
+    result = []
+    for idx in range(post_count):
+        start = offset + idx * count
+        result.append([urls[(start + step) % len(urls)] for step in range(count)])
+    return result, (offset + post_count * count) % len(urls)

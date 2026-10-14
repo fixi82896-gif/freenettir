@@ -6,6 +6,7 @@ on:
       - 'main.py'
       - 'proxy_utils.py'
       - 'test_proxy_utils.py'
+      - 'test_proxy_pipeline.py'
       - '.github/workflows/proxy-checks.yml'
   workflow_dispatch:
 
@@ -20,7 +21,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install bot dependency for isolated tests
+        run: python -m pip install requests
       - name: Compile bot and proxy helper (no bot execution)
         run: python -m py_compile main.py proxy_utils.py
       - name: Test proxy extraction (no Telegram messages)
-        run: python -m unittest -v test_proxy_utils
+        run: python -m unittest -v test_proxy_utils test_proxy_pipeline

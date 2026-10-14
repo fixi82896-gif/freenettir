@@ -12,7 +12,8 @@ import traceback
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from collections import Counter
-from proxy_utils import extract_proxy_links, extract_socks5_endpoints, normalize_proxy_link
+from proxy_utils import (extract_proxy_links, extract_socks5_endpoints, normalize_proxy_link,
+                         refresh_proxy_cache, plan_proxy_buttons)
 
 # ─── تنظیمات محیطی ───────────────────────────────────────────────
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -581,6 +582,8 @@ def load_history():
     history.setdefault("sent_ip_ports", [])
     history.setdefault("leftover_configs", [])
     history.setdefault("leftover_proxies", [])
+    history.setdefault("recent_proxy_pool", [])
+    history.setdefault("proxy_rotation_offset", 0)
     history.setdefault("sent_proxies_hashes", [])
     history.setdefault("custom_config_sources", [])
     history.setdefault("custom_proxy_sources", [])
@@ -598,6 +601,7 @@ def save_history(history):
     history["sent_proxies_hashes"] = history["sent_proxies_hashes"][-5000:]
     history["leftover_configs"] = history["leftover_configs"][-300:]
     history["leftover_proxies"] = history["leftover_proxies"][-300:]
+    history["recent_proxy_pool"] = history.get("recent_proxy_pool", [])[:180]
 
     try:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -695,7 +699,7 @@ def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
 
 def collect_proxies(history, sent_proxies_set):
     print("📦 در حال جمع‌آوری پروکسی‌ها...")
-    # Keep every existing hardcoded source; prioritize administrator sources and Telegram buttons.
+    # Keep the existing hardcoded and administrator-defined sources unchanged.
     base_proxy_sources = [
         "https://t.me/s/ProxyMTProto",
         "https://t.me/s/mtpro_to",
@@ -708,10 +712,10 @@ def collect_proxies(history, sent_proxies_set):
         list(history.get("custom_proxy_sources", [])) + base_proxy_sources
     ))
 
-    fresh_proxies = []
-    seen = set()
-    max_new = 120
-    per_source_limit = max(5, min(25, max_new // max(1, len(all_proxy_sources))))
+    observed_proxies = []
+    observed = set()
+    max_collected = 180
+    per_source_limit = max(10, min(35, max_collected // max(1, len(all_proxy_sources))))
 
     for src in all_proxy_sources:
         try:
@@ -726,41 +730,44 @@ def collect_proxies(history, sent_proxies_set):
                 candidates += extract_socks5_endpoints(response.text)
             accepted = 0
             for proxy in candidates:
-                if proxy in seen or get_md5(proxy) in sent_proxies_set:
+                if proxy in observed:
                     continue
-                fresh_proxies.append(proxy)
-                seen.add(proxy)
+                observed_proxies.append(proxy)
+                observed.add(proxy)
                 accepted += 1
-                if accepted >= per_source_limit or len(fresh_proxies) >= max_new:
+                if accepted >= per_source_limit or len(observed_proxies) >= max_collected:
                     break
-            print(f"🔗 منبع پروکسی {src}: {accepted} لینک جدید")
+            print(f"🔗 منبع پروکسی {src}: {accepted} لینک معتبر ساختاری (نه لزوماً فعال)")
         except Exception as exc:
             record_source_status(src, False, history)
             print(f"⚠️ خطا در خواندن منبع پروکسی {src}: {exc}")
-        if len(fresh_proxies) >= max_new:
+        if len(observed_proxies) >= max_collected:
             break
 
-    stored_proxies = []
+    # Recently observed links are kept for a bounded time to survive brief outages.
+    # A previous send is NOT proof a link is dead; historical hashes are only for priority.
+    archive = refresh_proxy_cache(
+        history.get("recent_proxy_pool", []), observed_proxies, int(time.time())
+    )
+    history["recent_proxy_pool"] = archive
+    candidates = [entry["url"] for entry in archive]
+
+    # Preserve previously queued proxy URLs as a last resort for compatibility.
     for raw_proxy in history.get("leftover_proxies", []):
         proxy = normalize_proxy_link(raw_proxy)
-        if proxy and proxy not in seen and get_md5(proxy) not in sent_proxies_set:
-            stored_proxies.append(proxy)
-            seen.add(proxy)
+        if proxy and proxy not in candidates and len(candidates) < 180:
+            candidates.append(proxy)
 
-    # Fresh and queued links are interleaved; old queue cannot starve new Telegram sources.
-    valid_proxies = []
-    for idx in range(max(len(fresh_proxies), len(stored_proxies))):
-        if idx < len(fresh_proxies):
-            valid_proxies.append(fresh_proxies[idx])
-        if idx < len(stored_proxies):
-            valid_proxies.append(stored_proxies[idx])
-        if len(valid_proxies) >= 300:
-            valid_proxies = valid_proxies[:300]
-            break
+    never_sent = [p for p in candidates if get_md5(p) not in sent_proxies_set]
+    previously_sent = [p for p in candidates if get_md5(p) in sent_proxies_set]
+    valid_proxies = never_sent + previously_sent
 
-    # Do not use untested, fixed "fallback" servers as if they were valid connections.
-    # Without a real proxy, the post retains only its advertising button.
-    print(f"📊 پروکسی‌های قابل استفاده در صف: {len(valid_proxies)} (سلامت اتصال آزمایش نشده)")
+    print(
+        f"📊 پروکسی‌های قابل استفاده در صف: {len(valid_proxies)}"
+        f" | لینک‌های جدید: {len(never_sent)}"
+        f" | قابل استفاده مجدد: {len(previously_sent)}"
+        " (تنها ساختار لینک بررسی شده؛ اتصال زنده آزمایش نشده)"
+    )
     return valid_proxies
 
 
@@ -801,15 +808,31 @@ def main():
         save_history(history)
         return
 
+    if not valid_proxies:
+        # Do not publish posts without the promised proxy buttons.
+        # Keep unsent configs for the next cycle; do not change serials or sent hashes.
+        print("🚨 هیچ لینک پروکسی معتبری از منابع یا حافظه موقت موجود نیست؛ ارسال پست‌های بدون پروکسی متوقف شد.")
+        history["leftover_configs"] = valid_configs[:300]
+        history["leftover_proxies"] = []
+        save_history(history)
+        return
+
     cycle_configs = valid_configs[:100]
     history["leftover_configs"] = valid_configs[100:]
 
     config_batches = [cycle_configs[i : i + 3] for i in range(0, len(cycle_configs), 3)]
-    # At most two distinct proxy buttons per post. Never recycle another post's links.
-    reserved_proxy_count = min(len(valid_proxies), len(config_batches) * 2)
-    cycle_proxies = valid_proxies[:reserved_proxy_count]
-    history["leftover_proxies"] = valid_proxies[reserved_proxy_count:]
-    proxy_batches = [cycle_proxies[i : i + 2] for i in range(0, len(cycle_proxies), 2)]
+    proxy_batches, next_offset = plan_proxy_buttons(
+        valid_proxies, len(config_batches), history.get("proxy_rotation_offset", 0)
+    )
+    history["proxy_rotation_offset"] = next_offset
+    history["leftover_proxies"] = valid_proxies[min(len(valid_proxies), len(config_batches) * 2):]
+    reused_button_count = sum(len(batch) for batch in proxy_batches) - min(
+        len(valid_proxies), len(config_batches) * 2
+    )
+    print(
+        f"🔘 دکمه‌های اتصال: {sum(len(batch) for batch in proxy_batches)} برای"
+        f" {len(config_batches)} پست؛ تخصیص تکراری بین پست‌ها: {max(0, reused_button_count)}"
+    )
 
     sent_all_configs = []
     country_flags = {}
