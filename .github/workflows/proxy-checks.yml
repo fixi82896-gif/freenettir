@@ -10,6 +10,7 @@ on:
       - 'proxy_health.py'
       - 'test_proxy_health.py'
       - 'test_admin_sources.py'
+      - 'test_source_menu.py'
       - '.github/workflows/main.yml'
       - '.github/workflows/proxy-checks.yml'
   workflow_dispatch:
@@ -30,4 +31,4 @@ jobs:
       - name: Compile bot and proxy helper (no bot execution)
         run: python -m py_compile main.py proxy_utils.py proxy_health.py
       - name: Test proxy extraction (no Telegram messages)
-        run: python -m unittest -v test_proxy_utils test_proxy_pipeline test_proxy_health test_admin_sources
+        run: python -m unittest -v test_proxy_utils test_proxy_pipeline test_proxy_health test_admin_sources test_source_menu
