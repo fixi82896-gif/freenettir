@@ -12,7 +12,7 @@ import traceback
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from collections import Counter
-from proxy_utils import (extract_proxy_links, extract_socks5_endpoints, normalize_proxy_link,
+from proxy_utils import (extract_proxy_links, normalize_proxy_link,
                          refresh_proxy_cache, plan_proxy_buttons)
 from proxy_health import verify_mtproto_pool, verified_buttons_for_post
 
@@ -653,19 +653,10 @@ def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
 
     seen_cfgs = set(c[0] for c in valid_configs)
 
-    base_github_sources = [
-        "https://manager.onetwothree123.ir/",
-        "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/all_extracted_configs.txt",
-        "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt",
-        "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt",
-        "https://raw.githubusercontent.com/sakha1370/OpenRay/main/output/all_valid_proxies.txt",
-        "https://raw.githubusercontent.com/ts-indexer/sub-indexer/main/sub/mix",
-        "https://raw.githubusercontent.com/yebekhe/TVC/main/subscriptions/xray/normal/mix",
-        "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt",
-        "https://raw.githubusercontent.com/EbrahimAhar/V2ray-Config/main/All_Configs_Sub.txt",
-    ]
-
-    all_config_sources = base_github_sources + list(history.get("custom_config_sources", []))
+    # Source addresses are managed exclusively by the Telegram admin panel.
+    # Keep the original ordering; do not inject fallback or built-in feeds.
+    all_config_sources = list(dict.fromkeys(history.get("custom_config_sources", [])))
+    print(f"📋 منابع کانفیگ ثبت‌شده در پنل: {len(all_config_sources)}")
 
     for src in all_config_sources:
         try:
@@ -700,18 +691,9 @@ def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
 
 def collect_proxies(history, sent_proxies_set):
     print("📦 در حال جمع‌آوری پروکسی‌ها...")
-    # Keep the existing hardcoded and administrator-defined sources unchanged.
-    base_proxy_sources = [
-        "https://t.me/s/ProxyMTProto",
-        "https://t.me/s/mtpro_to",
-        "https://t.me/s/TelMTProto",
-        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/mtproto/data.txt",
-        "https://office.onetwothree123.ir/",
-        "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
-    ]
-    all_proxy_sources = list(dict.fromkeys(
-        list(history.get("custom_proxy_sources", [])) + base_proxy_sources
-    ))
+    # Every proxy source is selected in the Telegram admin panel; no built-ins.
+    all_proxy_sources = list(dict.fromkeys(history.get("custom_proxy_sources", [])))
+    print(f"📋 منابع پروکسی ثبت‌شده در پنل: {len(all_proxy_sources)}")
 
     observed_proxies = []
     observed = set()
@@ -727,8 +709,6 @@ def collect_proxies(history, sent_proxies_set):
                 continue
             record_source_status(src, True, history)
             candidates = extract_proxy_links(response.text)
-            if "hookzof/socks5_list" in src:
-                candidates += extract_socks5_endpoints(response.text)
             accepted = 0
             for proxy in candidates:
                 if proxy in observed:
