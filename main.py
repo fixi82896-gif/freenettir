@@ -361,12 +361,12 @@ def build_sources_deletion_menu(history, expanded=0, notice=None):
     cfg_sources = history.get("custom_config_sources", [])
     prx_sources = history.get("custom_proxy_sources", [])
     text = (
-        "📋 <b>لیست و حذف منابع</b>\\n"
-        "برای نمایش منابع، بخش موردنظر را باز کنید.\\n"
+        "📋 <b>لیست و حذف منابع</b>\n"
+        "برای نمایش منابع، بخش موردنظر را باز کنید.\n"
         "برای بستن همان بخش دوباره روی عنوان آن بزنید."
     )
     if notice:
-        text += "\\n\\n" + html.escape(notice)
+        text += "\n\n" + html.escape(notice)
 
     keyboard = []
     for key, bit, title, sources, kind in (
