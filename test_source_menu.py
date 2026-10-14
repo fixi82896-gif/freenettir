@@ -30,9 +30,12 @@ def run_callback(data, history, from_user=123):
     updates.json.return_value = {"ok": True, "result": [
         callback_update(data, from_user=from_user)
     ]}
-    with patch.object(main, "TOKEN", "fake-token"), patch.object(main, "ADMIN_ID", "123"), \\
-         patch.object(main.HTTP_SESSION, "get", return_value=updates), \\
-         patch.object(main.HTTP_SESSION, "post", return_value=answer) as sent:
+    with (
+        patch.object(main, "TOKEN", "fake-token"),
+        patch.object(main, "ADMIN_ID", "123"),
+        patch.object(main.HTTP_SESSION, "get", return_value=updates),
+        patch.object(main.HTTP_SESSION, "post", return_value=answer) as sent,
+    ):
         main.process_admin_updates(history)
     return sent.call_args_list
 
@@ -46,8 +49,8 @@ class CollapsibleSourceMenuTests(unittest.TestCase):
         self.assertEqual(callbacks, ["src_menu_1", "src_menu_2"])
         self.assertIn("منابع کانفیگ (2)", labels[0])
         self.assertIn("منابع پروکسی (2)", labels[1])
-        self.assertIn("\\n", text)
-        self.assertNotIn("\\\\n", text)
+        self.assertIn("\n", text)
+        self.assertNotIn("\\n", text)
 
     def test_config_expands_without_expanding_proxy(self):
         _, menu = main.build_sources_deletion_menu(sample_history(), expanded=1)
