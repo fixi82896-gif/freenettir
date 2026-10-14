@@ -12,6 +12,7 @@ import traceback
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from collections import Counter
+from proxy_utils import extract_proxy_links, extract_socks5_endpoints, normalize_proxy_link
 
 # ─── تنظیمات محیطی ───────────────────────────────────────────────
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -694,54 +695,72 @@ def collect_configs(history, sent_hashes_set, sent_ip_ports_set):
 
 def collect_proxies(history, sent_proxies_set):
     print("📦 در حال جمع‌آوری پروکسی‌ها...")
-    valid_proxies = list(history.get("leftover_proxies", []))
-    seen_proxies = set(valid_proxies)
-
+    # Keep every existing hardcoded source; prioritize administrator sources and Telegram buttons.
     base_proxy_sources = [
-        "https://office.onetwothree123.ir/",
-        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/mtproto/data.txt",
-        "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
         "https://t.me/s/ProxyMTProto",
         "https://t.me/s/mtpro_to",
         "https://t.me/s/TelMTProto",
+        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/mtproto/data.txt",
+        "https://office.onetwothree123.ir/",
+        "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
     ]
+    all_proxy_sources = list(dict.fromkeys(
+        list(history.get("custom_proxy_sources", [])) + base_proxy_sources
+    ))
 
-    all_proxy_sources = base_proxy_sources + list(history.get("custom_proxy_sources", []))
+    fresh_proxies = []
+    seen = set()
+    max_new = 120
+    per_source_limit = max(5, min(25, max_new // max(1, len(all_proxy_sources))))
 
-    for p_src in all_proxy_sources:
+    for src in all_proxy_sources:
         try:
-            r = HTTP_SESSION.get(p_src, timeout=8)
-            if r.status_code == 200:
-                record_source_status(p_src, True, history)
-                found_p = re.findall(r'(https://t\.me/proxy\?[^\s#"\'>]+)', r.text)
-                for p in found_p:
-                    p_hash = get_md5(p)
-                    if p_hash not in sent_proxies_set and p not in seen_proxies:
-                        valid_proxies.append(p)
-                        seen_proxies.add(p)
-                    if len(valid_proxies) >= 150:
-                        break
-            else:
-                record_source_status(p_src, False, history)
-        except Exception as e:
-            record_source_status(p_src, False, history)
-            print(f"⚠️ خطا در خواندن منبع پروکسی {p_src}: {e}")
-
-        if len(valid_proxies) >= 150:
+            response = HTTP_SESSION.get(src, timeout=8)
+            if response.status_code != 200:
+                record_source_status(src, False, history)
+                print(f"⚠️ منبع پروکسی {src}: HTTP {response.status_code}")
+                continue
+            record_source_status(src, True, history)
+            candidates = extract_proxy_links(response.text)
+            if "hookzof/socks5_list" in src:
+                candidates += extract_socks5_endpoints(response.text)
+            accepted = 0
+            for proxy in candidates:
+                if proxy in seen or get_md5(proxy) in sent_proxies_set:
+                    continue
+                fresh_proxies.append(proxy)
+                seen.add(proxy)
+                accepted += 1
+                if accepted >= per_source_limit or len(fresh_proxies) >= max_new:
+                    break
+            print(f"🔗 منبع پروکسی {src}: {accepted} لینک جدید")
+        except Exception as exc:
+            record_source_status(src, False, history)
+            print(f"⚠️ خطا در خواندن منبع پروکسی {src}: {exc}")
+        if len(fresh_proxies) >= max_new:
             break
 
-    fallback_proxies = [
-        "https://t.me/proxy?server=⚡️🔥⚡️.freenet.cfd&port=443&secret=dd00000000000000000000000000000000",
-        "https://t.me/proxy?server=cloud.freenet.icu&port=8443&secret=ee00000000000000000000000000000000",
-        "https://t.me/proxy?server=germany.freenet.monster&port=443&secret=7gAAAAAAAAAAAAAAAAAAAAV3d3cuZ29vZ2xlLmNvbQ",
-    ]
-    for fp in fallback_proxies:
-        if len(valid_proxies) >= 3:
-            break
-        if fp not in seen_proxies:
-            valid_proxies.append(fp)
-            seen_proxies.add(fp)
+    stored_proxies = []
+    for raw_proxy in history.get("leftover_proxies", []):
+        proxy = normalize_proxy_link(raw_proxy)
+        if proxy and proxy not in seen and get_md5(proxy) not in sent_proxies_set:
+            stored_proxies.append(proxy)
+            seen.add(proxy)
 
+    # Fresh and queued links are interleaved; old queue cannot starve new Telegram sources.
+    valid_proxies = []
+    for idx in range(max(len(fresh_proxies), len(stored_proxies))):
+        if idx < len(fresh_proxies):
+            valid_proxies.append(fresh_proxies[idx])
+        if idx < len(stored_proxies):
+            valid_proxies.append(stored_proxies[idx])
+        if len(valid_proxies) >= 300:
+            valid_proxies = valid_proxies[:300]
+            break
+
+    # Do not use untested, fixed "fallback" servers as if they were valid connections.
+    # Without a real proxy, the post retains only its advertising button.
+    print(f"📊 پروکسی‌های قابل استفاده در صف: {len(valid_proxies)} (سلامت اتصال آزمایش نشده)")
     return valid_proxies
 
 
@@ -785,11 +804,12 @@ def main():
     cycle_configs = valid_configs[:100]
     history["leftover_configs"] = valid_configs[100:]
 
-    cycle_proxies = valid_proxies[:100]
-    history["leftover_proxies"] = valid_proxies[100:]
-
     config_batches = [cycle_configs[i : i + 3] for i in range(0, len(cycle_configs), 3)]
-    proxy_batches = [cycle_proxies[i : i + 3] for i in range(0, len(cycle_proxies), 3)]
+    # At most two distinct proxy buttons per post. Never recycle another post's links.
+    reserved_proxy_count = min(len(valid_proxies), len(config_batches) * 2)
+    cycle_proxies = valid_proxies[:reserved_proxy_count]
+    history["leftover_proxies"] = valid_proxies[reserved_proxy_count:]
+    proxy_batches = [cycle_proxies[i : i + 2] for i in range(0, len(cycle_proxies), 2)]
 
     sent_all_configs = []
     country_flags = {}
@@ -803,26 +823,12 @@ def main():
         loop_start_time = time.time()
 
         batch_p = list(proxy_batches[b_idx]) if b_idx < len(proxy_batches) else []
-        if len(batch_p) < 3:
-            for p in cycle_proxies:
-                if p not in batch_p:
-                    batch_p.append(p)
-                if len(batch_p) == 3:
-                    break
-
-        for p in batch_p:
-            sent_proxies_set.add(get_md5(p))
-
-        default_proxy = "https://t.me/freenettir"
-        p1 = batch_p[0] if len(batch_p) > 0 else default_proxy
-        p2 = batch_p[1] if len(batch_p) > 1 else p1
-
         ad_text = history.get("ad_button_text", DEFAULT_AD_TEXT)
         ad_url = history.get("ad_button_url", DEFAULT_SUPPORT_URL)
 
-        # چیدمان دقیق ۳ دکمه شیشه‌ای (۲ پروکسی و ۱ تبلیغ/حمایت)
-        keyboard_buttons = [
-            [{"text": "🚀 اتصال به پروکسی", "url": p1}, {"text": "🚀 اتصال به پروکسی", "url": p2}],
+        # Only real, distinct proxy URLs become proxy buttons; retain the ad button.
+        proxy_buttons = [{"text": "🚀 اتصال به پروکسی", "url": p} for p in batch_p]
+        keyboard_buttons = ([proxy_buttons] if proxy_buttons else []) + [
             [{"text": ad_text, "url": ad_url}],
         ]
         reply_markup = {"inline_keyboard": keyboard_buttons}
@@ -856,11 +862,12 @@ def main():
         post_text += "<b>🌐 @freenettir  مخزن اصلی سرورها</b>\n\n🔹 #v2ray #vpn #proxy"
         logo = get_random_logo()
 
+        delivered_to_any_channel = False
         for channel in CHANNELS:
             try:
                 if logo and os.path.exists(logo):
                     with open(logo, "rb") as photo_file:
-                        send_telegram_with_retry(
+                        response = send_telegram_with_retry(
                             f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
                             data={
                                 "chat_id": channel,
@@ -871,7 +878,7 @@ def main():
                             files={"photo": photo_file},
                         )
                 else:
-                    send_telegram_with_retry(
+                    response = send_telegram_with_retry(
                         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
                         data={
                             "chat_id": channel,
@@ -880,10 +887,25 @@ def main():
                             "reply_markup": json.dumps(reply_markup),
                         },
                     )
+                if response is None or response.status_code != 200 or not response.json().get("ok"):
+                    status = response.status_code if response is not None else "no response"
+                    description = response.json().get("description", "") if response is not None else ""
+                    print(f"❌ ارسال پارت {b_idx + 1} به کانال {channel} تأیید نشد (HTTP {status}: {description[:160]})")
+                else:
+                    delivered_to_any_channel = True
             except Exception as e:
                 print(f"❌ خطا در ارسال پارت {b_idx + 1} به کانال {channel}: {e}")
 
-        print(f"✅ پارت {b_idx + 1} از {len(config_batches)} ارسال شد. (سریال: {history['last_serial']})")
+        if delivered_to_any_channel:
+            for proxy in batch_p:
+                sent_proxies_set.add(get_md5(proxy))
+            print(f"✅ پارت {b_idx + 1} از {len(config_batches)} ارسال شد. (سریال: {history['last_serial']})")
+        else:
+            # Preserve unsuccessful proxy buttons for another cycle.
+            for proxy in batch_p:
+                if proxy not in history["leftover_proxies"]:
+                    history["leftover_proxies"].append(proxy)
+            print(f"❌ پارت {b_idx + 1} از {len(config_batches)} به هیچ کانالی ارسال نشد.")
 
         elapsed = time.time() - loop_start_time
         actual_sleep = max(0, delay_between_posts - elapsed)

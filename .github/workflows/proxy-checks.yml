@@ -1,0 +1,26 @@
+name: Proxy pipeline checks
+
+on:
+  pull_request:
+    paths:
+      - 'main.py'
+      - 'proxy_utils.py'
+      - 'test_proxy_utils.py'
+      - '.github/workflows/proxy-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile bot and proxy helper (no bot execution)
+        run: python -m py_compile main.py proxy_utils.py
+      - name: Test proxy extraction (no Telegram messages)
+        run: python -m unittest -v test_proxy_utils
