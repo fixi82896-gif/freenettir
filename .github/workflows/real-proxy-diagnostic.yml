@@ -1,0 +1,26 @@
+name: Real proxy health diagnostic
+
+on:
+  pull_request:
+    paths:
+      - 'diagnose_proxy_health.py'
+      - '.github/workflows/real-proxy-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-proxy-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install diagnostic tools at pinned revision
+        run: |
+          python -m pip install requests "mtproxy-checker @ git+https://github.com/alimghmi/mtproxychecker.git@80224c93c47242575107c83eb603d675e49226e8"
+      - name: Test proxy to Telegram from GitHub runner (read only)
+        run: python -u diagnose_proxy_health.py
